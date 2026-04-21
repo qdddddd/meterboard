@@ -597,3 +597,27 @@ server.listen(port, () => {
   console.log(`Token usage dashboard running on http://localhost:${port}`);
   console.log(`Enabled providers: ${enabled.join(", ") || "none"}`);
 });
+
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`Received ${signal}, shutting down`);
+
+  const serverClosed = new Promise((resolve) => server.close(() => resolve()));
+  server.closeIdleConnections?.();
+  server.closeAllConnections?.();
+
+  try {
+    await Promise.race([
+      Promise.all([serverClosed, closeSharedEdgeContext()]),
+      new Promise((resolve) => setTimeout(resolve, 8000)),
+    ]);
+  } catch (error) {
+    console.error("Shutdown error:", error);
+  }
+  process.exit(0);
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

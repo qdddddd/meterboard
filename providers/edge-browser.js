@@ -72,10 +72,23 @@ async function withEdgePage(runtime, env, work) {
 }
 
 async function closeSharedEdgeContext(runtime) {
-  if (!runtime?.edgeContextPromise) {
+  const pending = runtime?.edgeContextPromise || sharedEdgeContextPromise;
+  if (runtime) {
+    runtime.edgeContextPromise = null;
+  }
+  sharedEdgeContextPromise = null;
+  sharedEdgeProfilePath = null;
+
+  if (!pending) {
     return;
   }
-  runtime.edgeContextPromise = null;
+
+  try {
+    const context = await pending;
+    await context.close();
+  } catch {
+    // ignore — context may have failed to launch or already be closed
+  }
 }
 
 module.exports = {
