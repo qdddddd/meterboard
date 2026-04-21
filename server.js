@@ -249,31 +249,27 @@ async function fetchSingleProvider(range, providerId) {
   const todayDate = getShanghaiDateString();
   const rangeContainsToday = range.start <= todayDate && todayDate <= range.end;
 
-  try {
-    const providerResult = await fetchProviderResult(provider, range, runtime);
-    let todayMetric = toTodayMetric(pickTodayUsageFromResult(providerResult, todayDate));
-    let todayMetricError = null;
+  const providerResult = await fetchProviderResult(provider, range, runtime);
+  let todayMetric = toTodayMetric(pickTodayUsageFromResult(providerResult, todayDate));
+  let todayMetricError = null;
 
-    if (!todayMetric && !rangeContainsToday) {
-      try {
-        const todayResult = await fetchProviderResult(provider, { start: todayDate, end: todayDate }, runtime);
-        todayMetric = toTodayMetric(pickTodayUsageFromResult(todayResult, todayDate));
-      } catch (error) {
-        todayMetricError = safeProviderError(error);
-      }
+  if (!todayMetric && !rangeContainsToday) {
+    try {
+      const todayResult = await fetchProviderResult(provider, { start: todayDate, end: todayDate }, runtime);
+      todayMetric = toTodayMetric(pickTodayUsageFromResult(todayResult, todayDate));
+    } catch (error) {
+      todayMetricError = safeProviderError(error);
     }
-
-    return {
-      range,
-      provider: providerResult,
-      todayDate,
-      todayMetric,
-      todayMetricError,
-      fetchedAt: new Date().toISOString(),
-    };
-  } finally {
-    await closeSharedEdgeContext(runtime);
   }
+
+  return {
+    range,
+    provider: providerResult,
+    todayDate,
+    todayMetric,
+    todayMetricError,
+    fetchedAt: new Date().toISOString(),
+  };
 }
 
 async function fetchUsageAcrossProviders(range, handlers = {}) {
@@ -295,151 +291,147 @@ async function fetchUsageAcrossProviders(range, handlers = {}) {
     });
   }
 
-  try {
-    const providerRuns = [];
-    await Promise.all(
-      providers.map(async (provider) => {
-        try {
-          const providerResult = await fetchProviderResult(provider, range, runtime);
+  const providerRuns = [];
+  await Promise.all(
+    providers.map(async (provider) => {
+      try {
+        const providerResult = await fetchProviderResult(provider, range, runtime);
 
-          if (typeof handlers.onProvider === "function") {
-            handlers.onProvider({
-              provider: providerResult,
-              todayMetric: rangeContainsToday ? toTodayMetric(pickTodayUsageFromResult(providerResult, todayDate)) : null,
-            });
-          }
+        if (typeof handlers.onProvider === "function") {
+          handlers.onProvider({
+            provider: providerResult,
+            todayMetric: rangeContainsToday ? toTodayMetric(pickTodayUsageFromResult(providerResult, todayDate)) : null,
+          });
+        }
 
-          providerRuns.push({ ok: true, provider, providerResult });
-        } catch (error) {
-          const providerError = {
-            provider: provider.providerId,
-            message: safeProviderError(error),
-            dashboardUrl: getProviderDashboardUrl(provider, process.env),
+        providerRuns.push({ ok: true, provider, providerResult });
+      } catch (error) {
+        const providerError = {
+          provider: provider.providerId,
+          message: safeProviderError(error),
+          dashboardUrl: getProviderDashboardUrl(provider, process.env),
+        };
+
+        if (typeof handlers.onProviderError === "function") {
+          handlers.onProviderError({ error: providerError });
+        }
+
+        providerRuns.push({ ok: false, provider, providerError });
+      }
+    })
+  );
+
+  const successful = providerRuns.filter((item) => item.ok).map((item) => item.providerResult);
+  const errors = providerRuns.filter((item) => !item.ok).map((item) => item.providerError);
+
+  if (successful.length === 0) {
+    const details = errors.map((item) => `${item.provider}: ${item.message}`).join(" | ");
+    throw new Error(`No provider succeeded. ${details}`);
+  }
+
+  const daily = mergeProviderDaily(successful);
+  const totals = mergeUsageTotals(successful.map((item) => item.totals));
+  const todayUsageRows = [];
+  const todayByProvider = {};
+  const todayMetricErrors = [];
+
+  if (rangeContainsToday) {
+    for (const providerResult of successful) {
+      const todayRow = pickTodayUsageFromResult(providerResult, todayDate);
+      const metric = toTodayMetric(todayRow);
+
+      if (todayRow && metric) {
+        todayUsageRows.push(todayRow);
+        todayByProvider[providerResult.provider] = metric;
+      }
+    }
+  } else {
+    const providerById = new Map(providers.map((provider) => [provider.providerId, provider]));
+    const missingTodayProviders = successful.filter((providerResult) => !pickTodayUsageFromResult(providerResult, todayDate));
+
+    const todaySettled = await Promise.all(
+      missingTodayProviders.map(async (providerResult) => {
+        const provider = providerById.get(providerResult.meta?.sourceProviderId || providerResult.provider);
+
+        if (!provider) {
+          return {
+            ok: false,
+            provider: { providerId: providerResult.provider },
+            error: new Error("Provider definition not found for today fetch"),
           };
+        }
 
-          if (typeof handlers.onProviderError === "function") {
-            handlers.onProviderError({ error: providerError });
-          }
-
-          providerRuns.push({ ok: false, provider, providerError });
+        try {
+          const result = await fetchProviderResult(provider, { start: todayDate, end: todayDate }, runtime);
+          return {
+            ok: true,
+            provider,
+            result,
+          };
+        } catch (error) {
+          return {
+            ok: false,
+            provider,
+            error,
+          };
         }
       })
     );
 
-    const successful = providerRuns.filter((item) => item.ok).map((item) => item.providerResult);
-    const errors = providerRuns.filter((item) => !item.ok).map((item) => item.providerError);
+    for (const providerResult of successful) {
+      const todayRow = pickTodayUsageFromResult(providerResult, todayDate);
+      const metric = toTodayMetric(todayRow);
 
-    if (successful.length === 0) {
-      const details = errors.map((item) => `${item.provider}: ${item.message}`).join(" | ");
-      throw new Error(`No provider succeeded. ${details}`);
+      if (todayRow && metric) {
+        todayUsageRows.push(todayRow);
+        todayByProvider[providerResult.provider] = metric;
+      }
     }
 
-    const daily = mergeProviderDaily(successful);
-    const totals = mergeUsageTotals(successful.map((item) => item.totals));
-    const todayUsageRows = [];
-    const todayByProvider = {};
-    const todayMetricErrors = [];
-
-    if (rangeContainsToday) {
-      for (const providerResult of successful) {
-        const todayRow = pickTodayUsageFromResult(providerResult, todayDate);
+    for (const todayResult of todaySettled) {
+      if (todayResult.ok) {
+        const todayRow = pickTodayUsageFromResult(todayResult.result, todayDate);
         const metric = toTodayMetric(todayRow);
 
         if (todayRow && metric) {
           todayUsageRows.push(todayRow);
-          todayByProvider[providerResult.provider] = metric;
+          todayByProvider[todayResult.result.provider] = metric;
         }
-      }
-    } else {
-      const providerById = new Map(providers.map((provider) => [provider.providerId, provider]));
-      const missingTodayProviders = successful.filter((providerResult) => !pickTodayUsageFromResult(providerResult, todayDate));
-
-      const todaySettled = await Promise.all(
-        missingTodayProviders.map(async (providerResult) => {
-          const provider = providerById.get(providerResult.meta?.sourceProviderId || providerResult.provider);
-
-          if (!provider) {
-            return {
-              ok: false,
-              provider: { providerId: providerResult.provider },
-              error: new Error("Provider definition not found for today fetch"),
-            };
-          }
-
-          try {
-            const result = await fetchProviderResult(provider, { start: todayDate, end: todayDate }, runtime);
-            return {
-              ok: true,
-              provider,
-              result,
-            };
-          } catch (error) {
-            return {
-              ok: false,
-              provider,
-              error,
-            };
-          }
-        })
-      );
-
-      for (const providerResult of successful) {
-        const todayRow = pickTodayUsageFromResult(providerResult, todayDate);
-        const metric = toTodayMetric(todayRow);
-
-        if (todayRow && metric) {
-          todayUsageRows.push(todayRow);
-          todayByProvider[providerResult.provider] = metric;
-        }
-      }
-
-      for (const todayResult of todaySettled) {
-        if (todayResult.ok) {
-          const todayRow = pickTodayUsageFromResult(todayResult.result, todayDate);
-          const metric = toTodayMetric(todayRow);
-
-          if (todayRow && metric) {
-            todayUsageRows.push(todayRow);
-            todayByProvider[todayResult.result.provider] = metric;
-          }
-        } else {
-          todayMetricErrors.push({
-            provider: todayResult.provider.providerId,
-            message: safeProviderError(todayResult.error),
-          });
-        }
+      } else {
+        todayMetricErrors.push({
+          provider: todayResult.provider.providerId,
+          message: safeProviderError(todayResult.error),
+        });
       }
     }
-
-    const accountSummary = aggregateAccountSummary(successful, todayUsageRows);
-
-    const payload = {
-      range,
-      totals: {
-        inputTokens: Math.round(toNumber(totals.inputTokens)),
-        outputTokens: Math.round(toNumber(totals.outputTokens)),
-        totalTokens: Math.round(toNumber(totals.totalTokens)),
-        queryCount: Math.round(toNumber(totals.queryCount)),
-        costUsd: Number(toNumber(totals.costUsd).toFixed(4)),
-      },
-      accountSummary,
-      todayDate,
-      todayByProvider,
-      providers: successful,
-      providerErrors: errors,
-      todayMetricErrors,
-      daily,
-      fetchedAt: new Date().toISOString(),
-    };
-
-    if (typeof handlers.onComplete === "function") {
-      handlers.onComplete(payload);
-    }
-
-    return payload;
-  } finally {
-    await closeSharedEdgeContext(runtime);
   }
+
+  const accountSummary = aggregateAccountSummary(successful, todayUsageRows);
+
+  const payload = {
+    range,
+    totals: {
+      inputTokens: Math.round(toNumber(totals.inputTokens)),
+      outputTokens: Math.round(toNumber(totals.outputTokens)),
+      totalTokens: Math.round(toNumber(totals.totalTokens)),
+      queryCount: Math.round(toNumber(totals.queryCount)),
+      costUsd: Number(toNumber(totals.costUsd).toFixed(4)),
+    },
+    accountSummary,
+    todayDate,
+    todayByProvider,
+    providers: successful,
+    providerErrors: errors,
+    todayMetricErrors,
+    daily,
+    fetchedAt: new Date().toISOString(),
+  };
+
+  if (typeof handlers.onComplete === "function") {
+    handlers.onComplete(payload);
+  }
+
+  return payload;
 }
 
 function serveStaticFile(urlPath, response) {
