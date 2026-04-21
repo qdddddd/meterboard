@@ -296,8 +296,9 @@ async function fetchUsageAcrossProviders(range, handlers = {}) {
   }
 
   try {
-    const providerRuns = await Promise.all(
-      providers.map(async (provider, index) => {
+    const providerRuns = [];
+    await Promise.all(
+      providers.map(async (provider) => {
         try {
           const providerResult = await fetchProviderResult(provider, range, runtime);
 
@@ -308,12 +309,7 @@ async function fetchUsageAcrossProviders(range, handlers = {}) {
             });
           }
 
-          return {
-            index,
-            ok: true,
-            provider,
-            providerResult,
-          };
+          providerRuns.push({ ok: true, provider, providerResult });
         } catch (error) {
           const providerError = {
             provider: provider.providerId,
@@ -325,17 +321,10 @@ async function fetchUsageAcrossProviders(range, handlers = {}) {
             handlers.onProviderError({ error: providerError });
           }
 
-          return {
-            index,
-            ok: false,
-            provider,
-            providerError,
-          };
+          providerRuns.push({ ok: false, provider, providerError });
         }
       })
     );
-
-    providerRuns.sort((a, b) => a.index - b.index);
 
     const successful = providerRuns.filter((item) => item.ok).map((item) => item.providerResult);
     const errors = providerRuns.filter((item) => !item.ok).map((item) => item.providerError);

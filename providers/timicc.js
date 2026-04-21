@@ -1,61 +1,32 @@
-const { getShanghaiDateString, mergeUsageTotals, normalizeDailyRecords } = require("./utils");
+const { getShanghaiDateString, mergeUsageTotals, normalizeDailyRecords, toNumber } = require("./utils");
 const { withEdgePage } = require("./edge-browser");
 
 const TIMICC_DASHBOARD_URL = "https://timicc.com/dashboard";
 
-function escapeRegex(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s*");
-}
-
-function parseCompactNumber(value) {
-  const match = String(value || "")
-    .trim()
-    .replace(/,/g, "")
-    .match(/^([0-9]+(?:\.[0-9]+)?)([KMB])?$/i);
-
-  if (!match) {
-    return 0;
-  }
-
-  const amount = Number.parseFloat(match[1]);
-  const suffix = (match[2] || "").toUpperCase();
-
-  if (suffix === "B") {
-    return amount * 1_000_000_000;
-  }
-
-  if (suffix === "M") {
-    return amount * 1_000_000;
-  }
-
-  if (suffix === "K") {
-    return amount * 1_000;
-  }
-
-  return amount;
-}
-
-function parseLabeledMetric(text, label) {
-  const regex = new RegExp(
-    `${escapeRegex(label)}[^0-9$¥€]{0,24}([$¥€])?\\s*([0-9][0-9,]*(?:\\.[0-9]+)?[KMBkmb]?)`
-  );
-  const match = text.match(regex);
-  return match ? parseCompactNumber(match[2]) : null;
-}
-
-function isLoginScreen(text, url) {
-  const lowerText = text.toLowerCase();
+function isLoginScreen(url) {
   const lowerUrl = url.toLowerCase();
-  return text.includes("登录") || lowerText.includes("login") || lowerUrl.includes("/login") || lowerUrl.includes("/auth");
+  return lowerUrl.includes("/login") || lowerUrl.includes("/auth");
 }
 
-function parseDashboardMetrics(text) {
-  return {
-    totalTokens: Math.round(parseLabeledMetric(text, "今日 Token") || 0),
-    totalCost: parseLabeledMetric(text, "今日消费") || 0,
-    totalRequests: Math.round(parseLabeledMetric(text, "今日请求") || 0),
-    balanceRemainingUsd: parseLabeledMetric(text, "余额"),
-  };
+async function fetchTimiCcApi(page, path) {
+  return page.evaluate(async (requestPath) => {
+    const token = localStorage.getItem("auth_token") || "";
+    if (!token) {
+      throw new Error("Missing TimiCC auth_token — sign in at https://timicc.com and refresh");
+    }
+    const response = await fetch(requestPath, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        accept: "application/json",
+      },
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || (payload && payload.code !== undefined && payload.code !== 0)) {
+      const message = payload?.message || `TimiCC API ${response.status}`;
+      throw new Error(`${requestPath} — ${message}`);
+    }
+    return payload?.data ?? payload ?? null;
+  }, path);
 }
 
 async function scrapeTimiCcData(env, runtime) {
@@ -65,38 +36,33 @@ async function scrapeTimiCcData(env, runtime) {
       timeout: 60000,
     });
 
-    await page.waitForTimeout(3000);
-    await page
-      .waitForFunction(
-        () => document.body.innerText.includes("今日请求") || document.body.innerText.includes("今日 Token"),
-        { timeout: 15000 }
-      )
-      .catch(() => {});
-
-    const pageState = await page.evaluate(() => ({
-      text: document.body.innerText,
-      url: document.URL,
-    }));
-
-    if (isLoginScreen(pageState.text, pageState.url)) {
+    const url = await page.evaluate(() => document.URL);
+    if (isLoginScreen(url)) {
       throw new Error("Not logged in to TimiCC. Open Edge, sign in at https://timicc.com, then refresh again.");
     }
 
-    const metrics = parseDashboardMetrics(pageState.text);
+    const profile = await fetchTimiCcApi(page, "/api/v1/user/profile");
+    const stats = await fetchTimiCcApi(page, "/api/v1/usage/dashboard/stats");
+
+    const todayInputTokens = Math.round(
+      toNumber(stats?.today_input_tokens) +
+      toNumber(stats?.today_cache_creation_tokens) +
+      toNumber(stats?.today_cache_read_tokens)
+    );
+    const todayOutputTokens = Math.round(toNumber(stats?.today_output_tokens));
+    const todayTotalTokens = Math.round(toNumber(stats?.today_tokens)) || (todayInputTokens + todayOutputTokens);
     const today = getShanghaiDateString();
 
     return {
-      daily: [
-        {
-          date: today,
-          inputTokens: 0,
-          outputTokens: 0,
-          totalTokens: metrics.totalTokens,
-          queryCount: metrics.totalRequests,
-          costUsd: metrics.totalCost,
-        },
-      ],
-      balanceRemainingUsd: Number.isFinite(metrics.balanceRemainingUsd) ? metrics.balanceRemainingUsd : null,
+      daily: [{
+        date: today,
+        inputTokens: todayInputTokens,
+        outputTokens: todayOutputTokens,
+        totalTokens: todayTotalTokens,
+        queryCount: Math.round(toNumber(stats?.today_requests)),
+        costUsd: toNumber(stats?.today_cost),
+      }],
+      balanceRemainingUsd: toNumber(profile?.balance),
       balanceExpirationDate: null,
       scrapedAt: new Date().toISOString(),
     };
@@ -122,7 +88,7 @@ async function fetchUsage({ start, end, env, runtime }) {
         balanceExpirationDate: data.balanceExpirationDate || null,
       },
       meta: {
-        supportsTokenBreakdown: false,
+        supportsTokenBreakdown: true,
         supportsQueryCount: true,
       },
     };

@@ -1,17 +1,13 @@
-const { getShanghaiDateString, mergeUsageTotals, normalizeDailyRecords, parseShanghaiDateTime, toNumber } = require("./utils");
+const { getShanghaiDateString, mergeUsageTotals, parseShanghaiDateTime, toNumber } = require("./utils");
 const { withEdgePage } = require("./edge-browser");
 
 const PACKY_CONSOLE_URL = "https://www.packyapi.com/console";
-const PACKY_CONSUMPTION_LOG_URL = "https://www.packyapi.com/console/consumption-log";
 const PACKY_QUOTA_TO_USD = 500000;
 
 /**
- * Packy provider using Playwright browser automation.
- * 
- * This provider uses your existing Edge profile, so if you're already logged in
- * to packyapi.com in Edge, it will reuse that session automatically.
- * 
- * No credentials needed in .env - just log in manually in Edge once!
+ * Packy provider using Playwright browser automation to reuse the user's
+ * Edge session. Today's usage is read directly from the console's summary
+ * endpoints instead of paginating and aggregating the consumption log.
  */
 
 function buildUnixTimestamp(dateStr, isEnd) {
@@ -26,100 +22,15 @@ function isLoginScreen(text, url) {
   return text.includes("登录") || text.toLowerCase().includes("login") || url.includes("/login");
 }
 
-function parseBalanceByLabels(text, labels) {
-  if (!text) {
-    return null;
-  }
-
-  for (const label of labels) {
-    const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const regex = new RegExp(`${escapedLabel}[^0-9$]*\\$?\\s*([0-9][0-9,]*(?:\\.[0-9]+)?)`, "i");
-    const match = text.match(regex);
-    if (match) {
-      return parseFloat(match[1].replace(/,/g, ""));
-    }
-  }
-
-  return null;
+function resolveQuotaDivisor(quotaPerUnit, env) {
+  const envDivisor = toNumber(env?.PACKY_QUOTA_TO_USD);
+  if (envDivisor > 0) return envDivisor;
+  if (Number.isFinite(quotaPerUnit) && quotaPerUnit > 0) return quotaPerUnit;
+  return PACKY_QUOTA_TO_USD;
 }
 
-function parseConsoleSummary(text) {
-  const balanceRemainingUsd = parseBalanceByLabels(text, ["当前余额", "账户余额", "余额", "剩余余额", "可用余额"]);
-  const costMatch = text.match(/统计额度[^$]*\$\s*([0-9.]+)/);
-  const tokensMatch = text.match(/统计Tokens[^0-9]*([0-9,]+)/);
-
-  return {
-    balanceRemainingUsd,
-    totalCost: costMatch ? parseFloat(costMatch[1]) : 0,
-    totalTokens: tokensMatch ? parseInt(tokensMatch[1].replace(/,/g, ""), 10) : 0,
-  };
-}
-
-function derivePackyBalanceRemainingUsd(consoleText, consoleState, env) {
-  const parsedBalance = parseConsoleSummary(consoleText).balanceRemainingUsd;
-  if (Number.isFinite(parsedBalance)) {
-    return parsedBalance;
-  }
-
-  const rawQuota = toNumber(consoleState?.quota);
-  if (rawQuota > 0) {
-    const envDivisor = toNumber(env?.PACKY_QUOTA_TO_USD);
-    const divisor = envDivisor > 0
-      ? envDivisor
-      : Number.isFinite(consoleState?.quotaPerUnit) && consoleState.quotaPerUnit > 0
-        ? consoleState.quotaPerUnit
-        : PACKY_QUOTA_TO_USD;
-    return rawQuota / divisor;
-  }
-
-  return null;
-}
-
-function normalizePackyCostUsd(item, quotaPerUnit, env) {
-  const quota = toNumber(item?.quota);
-  if (quota > 0) {
-    const envDivisor = toNumber(env?.PACKY_QUOTA_TO_USD);
-    const divisor = envDivisor > 0
-      ? envDivisor
-      : Number.isFinite(quotaPerUnit) && quotaPerUnit > 0
-        ? quotaPerUnit
-        : PACKY_QUOTA_TO_USD;
-    return quota / divisor;
-  }
-
-  const directCost = toNumber(item?.cost) || toNumber(item?.amount);
-  return directCost > 0 ? directCost : 0;
-}
-
-function mapPackyLogItemToDailyRecord(item, quotaPerUnit, env) {
-  const createdAt = toNumber(item?.created_at);
-  if (!createdAt) {
-    return null;
-  }
-
-  const promptTokens = Math.round(toNumber(item.prompt_tokens));
-  const completionTokens = Math.round(toNumber(item.completion_tokens));
-  const totalTokens = Math.round(
-    toNumber(item.total_tokens) || promptTokens + completionTokens
-  );
-
-  const costUsd = normalizePackyCostUsd(item, quotaPerUnit, env);
-
-  return {
-    date: getShanghaiDateString(new Date(createdAt * 1000)),
-    inputTokens: promptTokens,
-    outputTokens: completionTokens,
-    totalTokens,
-    queryCount: 1,
-    costUsd,
-  };
-}
-
-async function fetchPackyLogItems(page, start, end) {
-  const startTimestamp = buildUnixTimestamp(start, false);
-  const endTimestamp = buildUnixTimestamp(end, true);
-
-  return page.evaluate(async ({ endTimestamp: endTs, startTimestamp: startTs }) => {
+async function fetchPackyApi(page, buildUrl) {
+  return page.evaluate(async (url) => {
     let currentUserId = -1;
     try {
       const rawUser = localStorage.getItem("user");
@@ -130,55 +41,21 @@ async function fetchPackyLogItems(page, start, end) {
       currentUserId = -1;
     }
 
-    if (currentUserId <= 0) {
-      throw new Error("Unable to identify the Packy account from local storage");
+    const response = await fetch(url, {
+      credentials: "include",
+      headers: {
+        accept: "application/json, text/plain, */*",
+        ...(currentUserId > 0 ? { "New-Api-User": String(currentUserId) } : {}),
+      },
+    });
+
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || payload?.success === false) {
+      const message = payload?.message || `Packy API ${response.status}`;
+      throw new Error(`${url} — ${message}`);
     }
-
-    const pageSize = 100;
-    let pageNumber = 1;
-    let totalPages = 1;
-    const allItems = [];
-
-    while (pageNumber <= totalPages) {
-      const params = new URLSearchParams({
-        p: String(pageNumber),
-        page_size: String(pageSize),
-        type: "0",
-        token_name: "",
-        model_name: "",
-        start_timestamp: String(startTs),
-        end_timestamp: String(endTs),
-        group: "",
-      });
-
-      const response = await fetch(`/api/log/self/?${params.toString()}`, {
-        credentials: "include",
-        headers: {
-          accept: "application/json, text/plain, */*",
-          "New-Api-User": String(currentUserId),
-        },
-      });
-
-      const payload = await response.json();
-      if (!response.ok || payload?.success === false) {
-        throw new Error(payload?.message || `Packy log request failed (${response.status})`);
-      }
-
-      const data = payload?.data || {};
-      const items = Array.isArray(data.items) ? data.items : [];
-      const total = Number(data.total) || items.length;
-      totalPages = Math.max(1, Math.ceil(total / pageSize));
-      allItems.push(...items);
-
-      if (items.length === 0) {
-        break;
-      }
-
-      pageNumber += 1;
-    }
-
-    return allItems;
-  }, { startTimestamp, endTimestamp });
+    return payload?.data ?? payload ?? null;
+  }, buildUrl);
 }
 
 async function scrapePackyData(start, end, env, runtime) {
@@ -187,25 +64,12 @@ async function scrapePackyData(start, end, env, runtime) {
       waitUntil: "domcontentloaded",
       timeout: 60000,
     });
-    await page.waitForTimeout(3000);
 
-    const consoleState = await page.evaluate(() => {
-      let quota = 0;
-      try {
-        const rawUser = localStorage.getItem("user");
-        const parsedUser = rawUser ? JSON.parse(rawUser) : null;
-        quota = Number(parsedUser?.quota || parsedUser?.user?.quota || 0);
-      } catch {
-        quota = 0;
-      }
-
-      return {
-        text: document.body.innerText,
-        url: document.URL,
-        quotaPerUnit: Number.parseFloat(localStorage.getItem("quota_per_unit") || "0"),
-        quota,
-      };
-    });
+    const consoleState = await page.evaluate(() => ({
+      text: document.body.innerText,
+      url: document.URL,
+      quotaPerUnit: Number.parseFloat(localStorage.getItem("quota_per_unit") || "0"),
+    }));
 
     if (isLoginScreen(consoleState.text, consoleState.url)) {
       throw new Error(
@@ -213,42 +77,64 @@ async function scrapePackyData(start, end, env, runtime) {
       );
     }
 
-    const consoleSummary = parseConsoleSummary(consoleState.text);
-    const balanceRemainingUsd = derivePackyBalanceRemainingUsd(consoleState.text, consoleState, env);
+    const startTs = buildUnixTimestamp(start, false);
+    const endTs = buildUnixTimestamp(end, true);
+    const divisor = resolveQuotaDivisor(consoleState.quotaPerUnit, env);
 
-    await page.goto(PACKY_CONSUMPTION_LOG_URL, {
-      waitUntil: "domcontentloaded",
-      timeout: 60000,
-    });
-    await page.waitForTimeout(2500);
+    const userData = await fetchPackyApi(page, "/api/user/self");
+    const remainingQuota = toNumber(userData?.quota);
+    const balanceRemainingUsd = remainingQuota > 0 ? remainingQuota / divisor : null;
 
-    const logState = await page.evaluate(() => ({
-      text: document.body.innerText,
-      url: document.URL,
-    }));
-
-    if (isLoginScreen(logState.text, logState.url)) {
-      throw new Error(
-        "Not logged in to Packy. Open Edge, sign in at https://www.packyapi.com, then refresh again."
-      );
-    }
-
-    const rawItems = await fetchPackyLogItems(page, start, end);
-    const daily = normalizeDailyRecords(
-      rawItems.map((item) => mapPackyLogItemToDailyRecord(item, consoleState.quotaPerUnit, env)).filter(Boolean)
+    const statData = await fetchPackyApi(
+      page,
+      `/api/log/self/stat?start_timestamp=${startTs}&end_timestamp=${endTs}&type=0`
     );
+    const spentQuota = toNumber(statData?.quota);
+    const costUsd = spentQuota > 0 ? spentQuota / divisor : 0;
+
+    const pageSize = 100;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let queryCount = 0;
+    let pageNumber = 1;
+    while (true) {
+      const logPage = await fetchPackyApi(
+        page,
+        `/api/log/self/?p=${pageNumber}&page_size=${pageSize}&type=0&token_name=&model_name=&start_timestamp=${startTs}&end_timestamp=${endTs}&group=`
+      );
+      if (pageNumber === 1) {
+        queryCount = toNumber(logPage?.total);
+      }
+      const items = Array.isArray(logPage?.items) ? logPage.items : [];
+      for (const item of items) {
+        inputTokens += Math.round(toNumber(item?.prompt_tokens));
+        outputTokens += Math.round(toNumber(item?.completion_tokens));
+      }
+      if (items.length < pageSize || pageNumber * pageSize >= queryCount) {
+        break;
+      }
+      pageNumber += 1;
+    }
+    const totalTokens = inputTokens + outputTokens;
+
     const today = getShanghaiDateString();
-    const todayDaily = daily.find((item) => item.date === today) || null;
+    const daily = [{
+      date: today,
+      inputTokens,
+      outputTokens,
+      totalTokens,
+      queryCount,
+      costUsd,
+    }];
 
     return {
       daily,
+      todayDaily: daily[0],
       balanceRemainingUsd,
       balanceExpirationDate: null,
       balanceRemainingText: null,
       balanceExpirationText: "No expiry",
       scrapedAt: new Date().toISOString(),
-      consoleSummary,
-      todayDaily,
     };
   });
 }
@@ -286,7 +172,7 @@ function createPackyProvider(envPrefix, defaultId) {
           balanceExpirationText: data.balanceExpirationText || null,
         },
         meta: {
-          supportsTokenBreakdown: false,
+          supportsTokenBreakdown: true,
           supportsQueryCount: true,
         },
       };
