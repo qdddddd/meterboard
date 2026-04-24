@@ -1,120 +1,105 @@
 const { getShanghaiDateString, mergeUsageTotals, normalizeDailyRecords, toNumber } = require("./utils");
-const { withEdgePage } = require("./edge-browser");
 
-/**
- * Right Code provider using Playwright browser automation.
- * 
- * This provider uses your existing Edge profile, so if you're already logged in
- * to right.codes in Edge, it will reuse that session automatically.
- * 
- * No credentials needed in .env - just log in manually in Edge once!
- */
+const RIGHT_CODE_API_BASE = "https://www.right.codes";
 
-async function scrapeRightCodeData(env, runtime) {
-  return withEdgePage(runtime, env, async (page) => {
-    // Navigate to dashboard
-    await page.goto("https://www.right.codes/dashboard", { 
-      waitUntil: "domcontentloaded", 
-      timeout: 60000
-    });
-    
-    // Wait for page to load
-    await page.waitForTimeout(3000);
-    
-    // Check if we need to log in
-    const isLoginPage = await page.evaluate(() => {
-      return document.body.textContent.includes('登录') || 
-             document.body.textContent.includes('login') ||
-             document.URL.includes('/login');
-    });
-    
-    if (isLoginPage) {
-      throw new Error(
-        'Not logged in to Right Code. Please:\n' +
-        '1. Open Edge and go to https://www.right.codes\n' +
-        '2. Log in manually\n' +
-        '3. Keep Edge open and try refreshing the dashboard again'
-      );
-    }
-    
-    // Extract usage data
-    return page.evaluate(() => {
-      const text = document.body.textContent;
-      
-      const requestsMatch = text.match(/累计请求\s*(\d+)/);
-      const tokensMatch = text.match(/累计\s*Token\s*([\d.]+[MK]?)/);
-      const costMatch = text.match(/累计花费\s*\$\s*([\d.]+)/);
-      
-      let totalRequests = requestsMatch ? parseInt(requestsMatch[1], 10) : 0;
-      let totalTokens = 0;
-      let totalCost = costMatch ? parseFloat(costMatch[1]) : 0;
-      
-      if (tokensMatch) {
-        const tokensText = tokensMatch[1];
-        if (tokensText.includes('M')) {
-          totalTokens = parseFloat(tokensText.replace(/[^0-9.]/g, '')) * 1000000;
-        } else if (tokensText.includes('K')) {
-          totalTokens = parseFloat(tokensText.replace(/[^0-9.]/g, '')) * 1000;
-        } else {
-          totalTokens = parseFloat(tokensText);
-        }
-      }
-      
-      const balanceMatch = text.match(/余额:\s*\$\s*([0-9.]+)/);
-      const balanceRemainingUsd = balanceMatch ? parseFloat(balanceMatch[1]) : null;
-      
-      const expiryMatch = text.match(/到期时间[^0-9]*(\d{4}-\d{2}-\d{2})/);
-      const balanceExpirationDate = expiryMatch ? expiryMatch[1] : null;
-      
-      const today = new Date().toISOString().slice(0, 10);
-      
-      return {
-        daily: [{
-          date: today,
-          inputTokens: 0,
-          outputTokens: 0,
-          totalTokens: Math.round(totalTokens),
-          queryCount: totalRequests,
-          costUsd: totalCost
-        }],
-        balanceRemainingUsd,
-        balanceExpirationDate,
-        scrapedAt: new Date().toISOString()
-      };
-    });
+async function fetchRightCodeApi(path, token) {
+  const response = await fetch(`${RIGHT_CODE_API_BASE}${path}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      accept: "application/json",
+    },
   });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message = payload?.message || payload?.error || `Right Code API ${response.status}`;
+    throw new Error(`${path} — ${message}`);
+  }
+  return payload;
 }
 
-async function fetchUsage({ start, end, env, runtime }) {
+function formatRangeTimestamp(dateStr, isEnd) {
+  return `${dateStr}T${isEnd ? "23:59:00" : "00:00:00"}`;
+}
+
+function pickEarliestFutureExpiration(subscriptions) {
+  if (!Array.isArray(subscriptions) || subscriptions.length === 0) return null;
+  const nowIso = new Date().toISOString();
+  const future = subscriptions
+    .map((item) => item?.expired_at)
+    .filter((value) => typeof value === "string" && value > nowIso)
+    .sort();
+  const chosen = future[0] || subscriptions[0]?.expired_at;
+  if (typeof chosen !== "string") return null;
+  const match = chosen.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : null;
+}
+
+async function fetchRightCodeData(start, end, env) {
+  const token = env.RIGHT_CODE_AUTH_TOKEN;
+  if (!token) {
+    throw new Error(
+      "RIGHT_CODE_AUTH_TOKEN is not set. Sign in at https://www.right.codes, then copy `userToken` from localStorage into .env."
+    );
+  }
+
+  const startParam = encodeURIComponent(formatRangeTimestamp(start, false));
+  const endParam = encodeURIComponent(formatRangeTimestamp(end, true));
+
+  const [me, stats, subscriptions] = await Promise.all([
+    fetchRightCodeApi("/auth/me", token),
+    fetchRightCodeApi(
+      `/use-log/stats/advanced?start_date=${startParam}&end_date=${endParam}&granularity=day`,
+      token
+    ),
+    fetchRightCodeApi("/subscriptions/list", token).catch(() => null),
+  ]);
+
+  const today = getShanghaiDateString();
+  const totalTokens = Math.round(toNumber(stats?.total_tokens));
+  const queryCount = Math.round(toNumber(stats?.total_requests));
+  const costUsd = toNumber(stats?.total_cost);
+
+  return {
+    daily: [{
+      date: today,
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens,
+      queryCount,
+      costUsd,
+    }],
+    balanceRemainingUsd: toNumber(me?.balance),
+    balanceExpirationDate: pickEarliestFutureExpiration(subscriptions?.subscriptions),
+  };
+}
+
+async function fetchUsage({ start, end, env }) {
   try {
-    const data = await scrapeRightCodeData(env, runtime);
+    const data = await fetchRightCodeData(start, end, env);
     const todayDate = getShanghaiDateString();
     const todayDaily = Array.isArray(data.daily) && data.daily[0]
       ? { ...data.daily[0], date: todayDate }
       : null;
-    
-    // Filter by date range
+
     const daily = normalizeDailyRecords(
-      (data.daily || []).map((item) => ({ ...item, date: todayDate })).filter(item => {
-        return item.date >= start && item.date <= end;
-      })
+      (data.daily || [])
+        .map((item) => ({ ...item, date: todayDate }))
+        .filter((item) => item.date >= start && item.date <= end)
     );
 
     const costMultiplier = toNumber(env.RIGHT_CODE_COST_MULTIPLIER) || 1;
-    const adjustedDaily = daily.map(item => ({
+    const adjustedDaily = daily.map((item) => ({
       ...item,
-      costUsd: item.costUsd * costMultiplier
+      costUsd: item.costUsd * costMultiplier,
     }));
-
-    const totals = mergeUsageTotals(adjustedDaily);
 
     return {
       provider: env.RIGHT_CODE_PROVIDER_ID || "right-code",
-      totals,
+      totals: mergeUsageTotals(adjustedDaily),
       daily: adjustedDaily,
       todayDaily,
       account: {
-        balanceRemainingUsd: data.balanceRemainingUsd || null,
+        balanceRemainingUsd: Number.isFinite(data.balanceRemainingUsd) ? data.balanceRemainingUsd : null,
         balanceExpirationDate: data.balanceExpirationDate || null,
       },
     };
