@@ -1,6 +1,6 @@
 # Token Usage Dashboard
 
-A local dashboard that reuses your logged-in Microsoft Edge profile to show today's token usage, query volume, spend, and balance across multiple providers.
+A local dashboard showing today's token usage, query volume, spend, and balance across multiple AI routing providers — all via their public JSON APIs.
 
 What it shows:
 - tokens used today
@@ -18,9 +18,7 @@ What it shows:
 
 ## Requirements
 
-1. Node.js
-2. Microsoft Edge
-3. A logged-in Edge profile for the providers you want to scrape
+Node.js 18+ (uses global `fetch`).
 
 ## Quick start
 
@@ -30,64 +28,42 @@ What it shows:
 cp .env.example .env
 ```
 
-2. Edit `.env`:
-
-```bash
-PORT=8088
-EDGE_PROFILE_PATH=/home/username/.config/microsoft-edge-dashboard
-PROVIDERS=right-code,micu,timicc,packy
-```
-
-3. Install dependencies:
+2. Install dependencies:
 
 ```bash
 npm install
 ```
 
-4. Install the Playwright browser runtime:
+3. Collect each provider's auth token. For every provider you enable, sign in to its console in any browser, open DevTools → Console, and paste the relevant expression. Add the printed values to `.env` (see `.env.example` for the full variable list).
 
-```bash
-npm run install-browsers
-```
+   - Right Code: `localStorage.getItem("userToken")` → `RIGHT_CODE_AUTH_TOKEN`
+   - TimiCC: `localStorage.getItem("auth_token")` → `TIMICC_AUTH_TOKEN`
+   - Packy: generate a token at https://www.packyapi.com/console → `PACKY_AUTH_TOKEN`; `JSON.parse(localStorage.user).id` → `PACKY_USER_ID`
+   - Micu: generate a token at https://www.openclaudecode.cn/console → `MICU_AUTH_TOKEN`; `JSON.parse(localStorage.user).id` → `MICU_USER_ID`
 
-5. Open the dedicated Edge profile and log in once:
-
-```bash
-node setup-profile.js
-```
-
-Log in to any providers you want to use:
-- `https://www.right.codes`
-- `https://www.packyapi.com`
-- `https://www.openclaudecode.cn`
-- `https://timicc.com`
-
-6. Start the dashboard:
+4. Start the dashboard:
 
 ```bash
 node server.js
 ```
 
-7. Open `http://localhost:8088`
+5. Open `http://localhost:8088`
 
 ## How it works
 
 - The server defaults to today's date in `Asia/Shanghai` when fetching usage.
-- The dashboard reuses your Edge profile session instead of storing provider credentials in `.env`.
-- Each provider reads its own console or log pages through Playwright.
-- The main refresh button reloads all enabled providers.
-- The small refresh icon on a provider card reloads only that provider and recalculates the combined totals.
+- Each provider calls its vendor's JSON API directly — no browser, no scraping.
+- The main refresh button reloads all enabled providers; the small icon on a provider card reloads just that one and recalculates the combined totals.
 
 ## Configuration
 
 Main settings in `.env`:
 
-- `PORT` - local server port
-- `EDGE_PROFILE_PATH` - Edge profile path to reuse for scraping
-- `PROVIDERS` - comma-separated provider ids
-- `RIGHT_CODE_COST_MULTIPLIER` - optional cost multiplier for Right Code
+- `PORT` — local server port
+- `PROVIDERS` — comma-separated provider ids; response ordering follows this list
+- `RIGHT_CODE_COST_MULTIPLIER` — optional cost multiplier for Right Code
 
-Optional provider display names:
+Optional provider display name overrides:
 
 - `RIGHT_CODE_PROVIDER_ID`
 - `MICU_PROVIDER_ID`
@@ -96,6 +72,5 @@ Optional provider display names:
 
 ## Notes
 
-- If a provider is not logged in, only that provider should fail; the dashboard still renders the others.
-- If your main Edge profile is already in use, a dedicated profile path is the safest option.
-- `setup-profile.js` is only a convenience tool for opening the configured Edge profile and logging in.
+- If a token expires, the owning provider starts returning 401 — regenerate or re-copy the token and restart the service.
+- If a provider fails, only that provider's card shows an error; the others still render.

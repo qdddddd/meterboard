@@ -4,12 +4,9 @@
   "private": true,
   "description": "Web dashboard for token usage across multiple AI providers",
   "scripts": {
-    "start": "node server.js",
-    "install-browsers": "npx playwright install chromium",
-    "setup-profile": "node setup-profile.js"
+    "start": "node server.js"
   },
   "dependencies": {
-    "playwright": "^1.40.0",
     "dotenv": "^16.0.0"
   }
 }

@@ -4,10 +4,7 @@ const path = require("node:path");
 const { URL } = require("node:url");
 
 const { getShanghaiDateString, mergeUsageTotals, normalizeDailyRecords, toNumber } = require("./providers/utils");
-const { closeSharedEdgeContext } = require("./providers/edge-browser");
 
-const openaiProvider = require("./providers/openai");
-const anthropicProvider = require("./providers/anthropic");
 const customProvider = require("./providers/custom");
 const rightCodeProvider = require("./providers/rightcode");
 const micuProvider = require("./providers/micu");
@@ -15,14 +12,6 @@ const timiCcProvider = require("./providers/timicc");
 const { createPackyProvider } = require("./providers/packy");
 
 const PROVIDERS = {
-  openai: {
-    ...openaiProvider,
-    dashboardUrl: "https://platform.openai.com/usage",
-  },
-  anthropic: {
-    ...anthropicProvider,
-    dashboardUrl: "https://console.anthropic.com/settings/usage",
-  },
   custom: {
     ...customProvider,
     getDashboardUrl: (env) => env.CUSTOM_PROVIDER_DASHBOARD_URL || null,
@@ -293,7 +282,7 @@ async function fetchUsageAcrossProviders(range, handlers = {}) {
 
   const providerRuns = [];
   await Promise.all(
-    providers.map(async (provider) => {
+    providers.map(async (provider, index) => {
       try {
         const providerResult = await fetchProviderResult(provider, range, runtime);
 
@@ -304,7 +293,7 @@ async function fetchUsageAcrossProviders(range, handlers = {}) {
           });
         }
 
-        providerRuns.push({ ok: true, provider, providerResult });
+        providerRuns.push({ ok: true, index, provider, providerResult });
       } catch (error) {
         const providerError = {
           provider: provider.providerId,
@@ -316,10 +305,12 @@ async function fetchUsageAcrossProviders(range, handlers = {}) {
           handlers.onProviderError({ error: providerError });
         }
 
-        providerRuns.push({ ok: false, provider, providerError });
+        providerRuns.push({ ok: false, index, provider, providerError });
       }
     })
   );
+
+  providerRuns.sort((a, b) => a.index - b.index);
 
   const successful = providerRuns.filter((item) => item.ok).map((item) => item.providerResult);
   const errors = providerRuns.filter((item) => !item.ok).map((item) => item.providerError);
@@ -580,24 +571,19 @@ server.listen(port, () => {
 });
 
 let shuttingDown = false;
-async function shutdown(signal) {
+function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`Received ${signal}, shutting down`);
 
-  const serverClosed = new Promise((resolve) => server.close(() => resolve()));
   server.closeIdleConnections?.();
   server.closeAllConnections?.();
 
-  try {
-    await Promise.race([
-      Promise.all([serverClosed, closeSharedEdgeContext()]),
-      new Promise((resolve) => setTimeout(resolve, 8000)),
-    ]);
-  } catch (error) {
-    console.error("Shutdown error:", error);
-  }
-  process.exit(0);
+  const timeout = setTimeout(() => process.exit(0), 8000);
+  server.close(() => {
+    clearTimeout(timeout);
+    process.exit(0);
+  });
 }
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));
