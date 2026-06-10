@@ -1,6 +1,6 @@
 const { getShanghaiDateString, mergeUsageTotals, parseShanghaiDateTime, toNumber } = require("./utils");
 
-const MICU_API_BASE = "https://www.openclaudecode.cn";
+const MICU_API_BASE = "https://www.micuapi.ai";
 const MICU_QUOTA_TO_USD = 500000;
 
 function buildUnixTimestamp(dateStr, isEnd) {
@@ -67,7 +67,7 @@ async function fetchMicuData(start, end, env) {
   const userId = Number(env.MICU_USER_ID);
   if (!token || !Number.isFinite(userId) || userId <= 0) {
     throw new Error(
-      "MICU_AUTH_TOKEN and MICU_USER_ID must both be set. Generate an access token at https://www.openclaudecode.cn/console; find your user id with `JSON.parse(localStorage.user).id` in the console."
+      "MICU_AUTH_TOKEN and MICU_USER_ID must both be set. Generate an access token at https://www.micuapi.ai/console; find your user id with `JSON.parse(localStorage.user).id` in the console."
     );
   }
 

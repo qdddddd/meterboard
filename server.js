@@ -22,7 +22,7 @@ const PROVIDERS = {
   },
   micu: {
     ...micuProvider,
-    dashboardUrl: "https://www.openclaudecode.cn/console",
+    dashboardUrl: "https://www.micuapi.ai/console",
   },
   timicc: {
     ...timiCcProvider,

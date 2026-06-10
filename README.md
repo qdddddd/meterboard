@@ -39,7 +39,7 @@ npm install
    - Right Code: `localStorage.getItem("userToken")` → `RIGHT_CODE_AUTH_TOKEN`
    - TimiCC: `localStorage.getItem("auth_token")` → `TIMICC_AUTH_TOKEN`
    - Packy: generate a token at https://www.packyapi.com/console → `PACKY_AUTH_TOKEN`; `JSON.parse(localStorage.user).id` → `PACKY_USER_ID`
-   - Micu: generate a token at https://www.openclaudecode.cn/console → `MICU_AUTH_TOKEN`; `JSON.parse(localStorage.user).id` → `MICU_USER_ID`
+   - Micu: generate a token at https://www.micuapi.ai/console → `MICU_AUTH_TOKEN`; `JSON.parse(localStorage.user).id` → `MICU_USER_ID`
 
 4. Start the dashboard:
 
