@@ -5,36 +5,7 @@ const { getShanghaiDateString, mergeUsageTotals, normalizeDailyRecords, toNumber
 
 const TIMICC_API_BASE = "https://timicc.com";
 const DEFAULT_LEVELDB_PATH = path.join(os.homedir(), ".config", "microsoft-edge", "Default", "Local Storage", "leveldb");
-const JWT_RE = /eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
 const TIMICC_MARKER = "timicc.com";
-
-let cachedToken = null;
-
-function decodeJwtPayload(jwt) {
-  const parts = jwt.split(".");
-  if (parts.length !== 3) return null;
-  try {
-    const padded = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    return JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
-  } catch {
-    return null;
-  }
-}
-
-function findTimiccTokensInBuffer(buf) {
-  const text = buf.toString("latin1");
-  const candidates = [];
-  let match;
-  while ((match = JWT_RE.exec(text)) !== null) {
-    const window = text.slice(Math.max(0, match.index - 500), match.index);
-    if (!window.includes(TIMICC_MARKER)) continue;
-    const payload = decodeJwtPayload(match[0]);
-    if (payload && typeof payload.exp === "number") {
-      candidates.push({ token: match[0], exp: payload.exp });
-    }
-  }
-  return candidates;
-}
 
 function expandHome(p) {
   if (!p) return p;
@@ -47,37 +18,24 @@ function resolveLeveldbPath(env) {
   return expandHome(env.TIMICC_LOCALSTORAGE_PATH) || DEFAULT_LEVELDB_PATH;
 }
 
-function listLeveldbFiles(leveldbPath, newestFirst = false) {
+// Leveldb files, newest first, so the most recently written value wins.
+function listLeveldbFiles(leveldbPath) {
   let entries;
   try {
     entries = fs.readdirSync(leveldbPath);
   } catch {
     return [];
   }
-  const files = entries
+  return entries
     .filter((name) => /\.(ldb|log)$/.test(name))
     .map((name) => {
       const full = path.join(leveldbPath, name);
       let mtime = 0;
       try { mtime = fs.statSync(full).mtimeMs; } catch {}
       return { full, mtime };
-    });
-  if (newestFirst) files.sort((a, b) => b.mtime - a.mtime);
-  return files.map((f) => f.full);
-}
-
-function readFreshTimiccToken(leveldbPath) {
-  const now = Math.floor(Date.now() / 1000);
-  let best = null;
-  for (const file of listLeveldbFiles(leveldbPath)) {
-    let buf;
-    try { buf = fs.readFileSync(file); } catch { continue; }
-    for (const candidate of findTimiccTokensInBuffer(buf)) {
-      if (candidate.exp <= now) continue;
-      if (!best || candidate.exp > best.exp) best = candidate;
-    }
-  }
-  return best?.token || null;
+    })
+    .sort((a, b) => b.mtime - a.mtime)
+    .map((f) => f.full);
 }
 
 // timicc.com no longer keeps its bearer token in localStorage (it moved to an
@@ -109,7 +67,7 @@ function extractTimiccJsonValue(text, keyName) {
 }
 
 function readTimiccAuthUser(leveldbPath) {
-  for (const file of listLeveldbFiles(leveldbPath, true)) {
+  for (const file of listLeveldbFiles(leveldbPath)) {
     let text;
     try { text = fs.readFileSync(file).toString("latin1"); } catch { continue; }
     const obj = extractTimiccJsonValue(text, "auth_user");
@@ -136,43 +94,20 @@ async function fetchTimiCcApi(apiPath, token) {
   return payload?.data ?? payload ?? null;
 }
 
-function isAuthExpired(error) {
-  if (!error) return false;
-  if (error.status === 401) return true;
-  return /token has expired|unauthorized|invalid token/i.test(error.serverMessage || error.message || "");
-}
-
-async function callWithRetry(env, apiPath) {
-  const leveldbPath = resolveLeveldbPath(env);
-  let token = cachedToken || env.TIMICC_AUTH_TOKEN;
-
+async function callTimiCcApi(env, apiPath) {
+  const token = env.TIMICC_AUTH_TOKEN;
   if (!token) {
-    token = readFreshTimiccToken(leveldbPath);
-    if (!token) {
-      throw new Error(
-        "No TimiCC token available. timicc.com no longer keeps its bearer token in localStorage — capture it from DevTools > Network (the \"Authorization: Bearer\" header on an /api/v1 request) and set TIMICC_AUTH_TOKEN in .env."
-      );
-    }
-    cachedToken = token;
+    throw new Error(
+      "No TimiCC token available. timicc.com no longer keeps its bearer token in localStorage — capture it from DevTools > Network (the \"Authorization: Bearer\" header on an /api/v1 request) and set TIMICC_AUTH_TOKEN in .env."
+    );
   }
-
-  try {
-    return await fetchTimiCcApi(apiPath, token);
-  } catch (error) {
-    if (!isAuthExpired(error)) throw error;
-    const fresh = readFreshTimiccToken(leveldbPath);
-    if (!fresh || fresh === token) {
-      throw new Error(`${error.message} (TIMICC_AUTH_TOKEN expired — capture a fresh one from DevTools > Network and update .env)`);
-    }
-    cachedToken = fresh;
-    return await fetchTimiCcApi(apiPath, fresh);
-  }
+  return fetchTimiCcApi(apiPath, token);
 }
 
 async function fetchTimiCcData(env) {
   try {
-    const profile = await callWithRetry(env, "/api/v1/user/profile");
-    const stats = await callWithRetry(env, "/api/v1/usage/dashboard/stats");
+    const profile = await callTimiCcApi(env, "/api/v1/user/profile");
+    const stats = await callTimiCcApi(env, "/api/v1/usage/dashboard/stats");
 
     const todayInputTokens = Math.round(
       toNumber(stats?.today_input_tokens) +
