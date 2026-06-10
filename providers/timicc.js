@@ -47,20 +47,29 @@ function resolveLeveldbPath(env) {
   return expandHome(env.TIMICC_LOCALSTORAGE_PATH) || DEFAULT_LEVELDB_PATH;
 }
 
-function readFreshTimiccToken(leveldbPath) {
+function listLeveldbFiles(leveldbPath, newestFirst = false) {
   let entries;
   try {
     entries = fs.readdirSync(leveldbPath);
   } catch {
-    return null;
+    return [];
   }
   const files = entries
     .filter((name) => /\.(ldb|log)$/.test(name))
-    .map((name) => path.join(leveldbPath, name));
+    .map((name) => {
+      const full = path.join(leveldbPath, name);
+      let mtime = 0;
+      try { mtime = fs.statSync(full).mtimeMs; } catch {}
+      return { full, mtime };
+    });
+  if (newestFirst) files.sort((a, b) => b.mtime - a.mtime);
+  return files.map((f) => f.full);
+}
 
+function readFreshTimiccToken(leveldbPath) {
   const now = Math.floor(Date.now() / 1000);
   let best = null;
-  for (const file of files) {
+  for (const file of listLeveldbFiles(leveldbPath)) {
     let buf;
     try { buf = fs.readFileSync(file); } catch { continue; }
     for (const candidate of findTimiccTokensInBuffer(buf)) {
@@ -69,6 +78,44 @@ function readFreshTimiccToken(leveldbPath) {
     }
   }
   return best?.token || null;
+}
+
+// timicc.com no longer keeps its bearer token in localStorage (it moved to an
+// httpOnly cookie), but it still caches the account profile under `auth_user`.
+// Pull the latest one so we can at least surface the balance when the API token
+// is missing or expired. Anchored to the timicc.com origin, brace-matched JSON,
+// newest leveldb file wins.
+function extractTimiccJsonValue(text, keyName) {
+  let i = -1;
+  while ((i = text.indexOf(keyName, i + 1)) !== -1) {
+    if (!text.slice(Math.max(0, i - 30), i).includes(TIMICC_MARKER)) continue;
+    const start = text.indexOf("{", i);
+    if (start === -1) continue;
+    const limit = Math.min(text.length, start + 50000);
+    let depth = 0, inStr = false, esc = false;
+    for (let j = start; j < limit; j++) {
+      const c = text[j];
+      if (esc) { esc = false; continue; }
+      if (c === "\\") { esc = true; continue; }
+      if (c === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (c === "{") depth++;
+      else if (c === "}" && --depth === 0) {
+        try { return JSON.parse(text.slice(start, j + 1)); } catch { break; }
+      }
+    }
+  }
+  return null;
+}
+
+function readTimiccAuthUser(leveldbPath) {
+  for (const file of listLeveldbFiles(leveldbPath, true)) {
+    let text;
+    try { text = fs.readFileSync(file).toString("latin1"); } catch { continue; }
+    const obj = extractTimiccJsonValue(text, "auth_user");
+    if (obj && obj.balance !== undefined) return obj;
+  }
+  return null;
 }
 
 async function fetchTimiCcApi(apiPath, token) {
@@ -103,7 +150,7 @@ async function callWithRetry(env, apiPath) {
     token = readFreshTimiccToken(leveldbPath);
     if (!token) {
       throw new Error(
-        `No TimiCC token available. Set TIMICC_AUTH_TOKEN in .env, or sign in at https://timicc.com so the token can be read from ${leveldbPath}.`
+        "No TimiCC token available. timicc.com no longer keeps its bearer token in localStorage — capture it from DevTools > Network (the \"Authorization: Bearer\" header on an /api/v1 request) and set TIMICC_AUTH_TOKEN in .env."
       );
     }
     cachedToken = token;
@@ -115,7 +162,7 @@ async function callWithRetry(env, apiPath) {
     if (!isAuthExpired(error)) throw error;
     const fresh = readFreshTimiccToken(leveldbPath);
     if (!fresh || fresh === token) {
-      throw new Error(`${error.message} (no fresher token in ${leveldbPath} — re-login at https://timicc.com)`);
+      throw new Error(`${error.message} (TIMICC_AUTH_TOKEN expired — capture a fresh one from DevTools > Network and update .env)`);
     }
     cachedToken = fresh;
     return await fetchTimiCcApi(apiPath, fresh);
@@ -123,31 +170,50 @@ async function callWithRetry(env, apiPath) {
 }
 
 async function fetchTimiCcData(env) {
-  const profile = await callWithRetry(env, "/api/v1/user/profile");
-  const stats = await callWithRetry(env, "/api/v1/usage/dashboard/stats");
+  try {
+    const profile = await callWithRetry(env, "/api/v1/user/profile");
+    const stats = await callWithRetry(env, "/api/v1/usage/dashboard/stats");
 
-  const todayInputTokens = Math.round(
-    toNumber(stats?.today_input_tokens) +
-    toNumber(stats?.today_cache_creation_tokens) +
-    toNumber(stats?.today_cache_read_tokens)
-  );
-  const todayOutputTokens = Math.round(toNumber(stats?.today_output_tokens));
-  const todayTotalTokens = Math.round(toNumber(stats?.today_tokens)) || (todayInputTokens + todayOutputTokens);
-  const today = getShanghaiDateString();
+    const todayInputTokens = Math.round(
+      toNumber(stats?.today_input_tokens) +
+      toNumber(stats?.today_cache_creation_tokens) +
+      toNumber(stats?.today_cache_read_tokens)
+    );
+    const todayOutputTokens = Math.round(toNumber(stats?.today_output_tokens));
+    const todayTotalTokens = Math.round(toNumber(stats?.today_tokens)) || (todayInputTokens + todayOutputTokens);
+    const today = getShanghaiDateString();
 
-  return {
-    daily: [{
-      date: today,
-      inputTokens: todayInputTokens,
-      outputTokens: todayOutputTokens,
-      totalTokens: todayTotalTokens,
-      queryCount: Math.round(toNumber(stats?.today_requests)),
-      costUsd: toNumber(stats?.today_cost),
-    }],
-    balanceRemainingUsd: toNumber(profile?.balance),
-    balanceExpirationDate: null,
-    scrapedAt: new Date().toISOString(),
-  };
+    return {
+      daily: [{
+        date: today,
+        inputTokens: todayInputTokens,
+        outputTokens: todayOutputTokens,
+        totalTokens: todayTotalTokens,
+        queryCount: Math.round(toNumber(stats?.today_requests)),
+        costUsd: toNumber(stats?.today_cost),
+      }],
+      balanceRemainingUsd: toNumber(profile?.balance),
+      balanceExpirationDate: null,
+      scrapedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    // No usable API token (missing/expired). The bearer token is no longer in
+    // localStorage, but the cached profile is — surface the balance from there
+    // so the dashboard stays useful, with usage left blank.
+    const cached = readTimiccAuthUser(resolveLeveldbPath(env));
+    const cachedBalance = toNumber(cached?.balance);
+    if (cached && Number.isFinite(cachedBalance)) {
+      return {
+        daily: [],
+        balanceRemainingUsd: cachedBalance,
+        balanceExpirationDate: null,
+        scrapedAt: new Date().toISOString(),
+        balanceOnly: true,
+        balanceOnlyReason: error.message,
+      };
+    }
+    throw error;
+  }
 }
 
 async function fetchUsage({ start, end, env }) {
@@ -171,6 +237,9 @@ async function fetchUsage({ start, end, env }) {
       meta: {
         supportsTokenBreakdown: true,
         supportsQueryCount: true,
+        ...(data.balanceOnly
+          ? { balanceOnly: true, note: "Balance read from browser localStorage; usage needs a valid TIMICC_AUTH_TOKEN." }
+          : {}),
       },
     };
   } catch (error) {
