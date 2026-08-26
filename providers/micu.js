@@ -1,4 +1,5 @@
 const { getShanghaiDateString, mergeUsageTotals, parseShanghaiDateTime, toNumber } = require("./utils");
+const { requestJson } = require("./http");
 
 const MICU_API_BASE = "https://www.micuapi.ai";
 const MICU_QUOTA_TO_USD = 500000;
@@ -17,17 +18,20 @@ function resolveQuotaDivisor(env) {
   return MICU_QUOTA_TO_USD;
 }
 
-async function fetchMicuApi(path, token, userId) {
-  const response = await fetch(`${MICU_API_BASE}${path}`, {
+// Local DNS poisons www.micuapi.ai, so requests must tunnel through the
+// proxy (requestJson) and let it resolve the hostname — bare fetch ignores
+// proxy env vars and dies on the poisoned route.
+async function fetchMicuApi(path, token, userId, env) {
+  const { status, payload } = await requestJson(`${MICU_API_BASE}${path}`, {
     headers: {
       Authorization: `Bearer ${token}`,
       "new-api-user": String(userId),
       accept: "application/json, text/plain, */*",
     },
+    env,
   });
-  const payload = await response.json().catch(() => null);
-  if (!response.ok || payload?.success === false) {
-    const message = payload?.message || `Micu API ${response.status}`;
+  if (status < 200 || status >= 300 || payload?.success === false) {
+    const message = payload?.message || `Micu API ${status}`;
     throw new Error(`${path} — ${message}`);
   }
   return payload?.data ?? payload ?? null;
@@ -75,14 +79,15 @@ async function fetchMicuData(start, end, env) {
   const endTs = buildUnixTimestamp(end, true);
   const divisor = resolveQuotaDivisor(env);
 
-  const userData = await fetchMicuApi("/api/user/self", token, userId);
+  const userData = await fetchMicuApi("/api/user/self", token, userId, env);
   const remainingQuota = toNumber(userData?.quota ?? userData?.user?.quota);
   const balanceRemainingUsd = remainingQuota > 0 ? remainingQuota / divisor : null;
 
   const statData = await fetchMicuApi(
     `/api/log/self/stat?start_timestamp=${startTs}&end_timestamp=${endTs}&type=0`,
     token,
-    userId
+    userId,
+    env
   );
   const spentQuota = toNumber(statData?.quota);
   const costUsd = spentQuota > 0 ? spentQuota / divisor : 0;
@@ -96,7 +101,8 @@ async function fetchMicuData(start, end, env) {
     const logPage = await fetchMicuApi(
       `/api/log/self?p=${pageNumber}&page_size=${pageSize}&type=0&token_name=&model_name=&start_timestamp=${startTs}&end_timestamp=${endTs}&group=&request_id=`,
       token,
-      userId
+      userId,
+      env
     );
     if (pageNumber === 1) {
       queryCount = toNumber(logPage?.total);
