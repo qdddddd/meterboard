@@ -1,4 +1,5 @@
 const { getShanghaiDateString, mergeUsageTotals, normalizeDailyRecords, toNumber } = require("./utils");
+const { requestJson } = require("./http");
 
 const TIMICC_API_BASE = "https://timicc.com";
 
@@ -6,13 +7,13 @@ const TIMICC_API_BASE = "https://timicc.com";
 // authenticated by a non-expiring API key (sk-...) from the console. This
 // avoids the session token, which lives in an httpOnly cookie and expires
 // every few days.
-async function fetchTimiccUsage(apiKey) {
-  const response = await fetch(`${TIMICC_API_BASE}/v1/usage`, {
+async function fetchTimiccUsage(apiKey, env) {
+  const { status, payload } = await requestJson(`${TIMICC_API_BASE}/v1/usage`, {
     headers: { Authorization: `Bearer ${apiKey}`, accept: "application/json" },
+    env,
   });
-  const payload = await response.json().catch(() => null);
-  if (!response.ok || payload?.isValid === false) {
-    const message = payload?.message || payload?.error?.message || `TimiCC API ${response.status}`;
+  if (status < 200 || status >= 300 || payload?.isValid === false) {
+    const message = payload?.message || payload?.error?.message || `TimiCC API ${status}`;
     throw new Error(`/v1/usage — ${message}`);
   }
   return payload;
@@ -45,7 +46,7 @@ async function fetchUsage({ start, end, env }) {
       );
     }
 
-    const usage = await fetchTimiccUsage(apiKey);
+    const usage = await fetchTimiccUsage(apiKey, env);
     const todayDate = getShanghaiDateString();
     const todayRecord = buildTodayRecord(usage?.usage?.today);
     const daily = normalizeDailyRecords(

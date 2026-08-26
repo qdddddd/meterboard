@@ -1,17 +1,21 @@
 const { getShanghaiDateString, mergeUsageTotals, normalizeDailyRecords, toNumber } = require("./utils");
+const { requestJson } = require("./http");
 
 const RIGHT_CODE_API_BASE = "https://www.right.codes";
 
-async function fetchRightCodeApi(path, token) {
-  const response = await fetch(`${RIGHT_CODE_API_BASE}${path}`, {
+// Local DNS poisons www.right.codes, so requests must tunnel through the
+// proxy (requestJson) and let it resolve the hostname — bare fetch ignores
+// proxy env vars and dies on the poisoned route.
+async function fetchRightCodeApi(path, token, env) {
+  const { status, payload } = await requestJson(`${RIGHT_CODE_API_BASE}${path}`, {
     headers: {
       Authorization: `Bearer ${token}`,
       accept: "application/json",
     },
+    env,
   });
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) {
-    const message = payload?.message || payload?.error || `Right Code API ${response.status}`;
+  if (status < 200 || status >= 300) {
+    const message = payload?.message || payload?.error || `Right Code API ${status}`;
     throw new Error(`${path} — ${message}`);
   }
   return payload;
@@ -46,12 +50,13 @@ async function fetchRightCodeData(start, end, env) {
   const endParam = encodeURIComponent(formatRangeTimestamp(end, true));
 
   const [me, stats, subscriptions] = await Promise.all([
-    fetchRightCodeApi("/auth/me", token),
+    fetchRightCodeApi("/auth/me", token, env),
     fetchRightCodeApi(
       `/use-log/stats/advanced?start_date=${startParam}&end_date=${endParam}&granularity=day`,
-      token
+      token,
+      env
     ),
-    fetchRightCodeApi("/subscriptions/list", token).catch(() => null),
+    fetchRightCodeApi("/subscriptions/list", token, env).catch(() => null),
   ]);
 
   const today = getShanghaiDateString();

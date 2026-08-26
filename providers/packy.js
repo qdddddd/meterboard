@@ -1,4 +1,5 @@
 const { getShanghaiDateString, mergeUsageTotals, parseShanghaiDateTime, toNumber } = require("./utils");
+const { requestJson } = require("./http");
 
 const PACKY_API_BASE = "https://www.packyapi.com";
 const PACKY_QUOTA_TO_USD = 500000;
@@ -17,17 +18,20 @@ function resolveQuotaDivisor(env) {
   return PACKY_QUOTA_TO_USD;
 }
 
-async function fetchPackyApi(path, token, userId) {
-  const response = await fetch(`${PACKY_API_BASE}${path}`, {
+// Local DNS poisons www.packyapi.com, so requests must tunnel through the
+// proxy (requestJson) and let it resolve the hostname — bare fetch ignores
+// proxy env vars and dies on the poisoned route.
+async function fetchPackyApi(path, token, userId, env) {
+  const { status, payload } = await requestJson(`${PACKY_API_BASE}${path}`, {
     headers: {
       Authorization: `Bearer ${token}`,
       "New-Api-User": String(userId),
       accept: "application/json, text/plain, */*",
     },
+    env,
   });
-  const payload = await response.json().catch(() => null);
-  if (!response.ok || payload?.success === false) {
-    const message = payload?.message || `Packy API ${response.status}`;
+  if (status < 200 || status >= 300 || payload?.success === false) {
+    const message = payload?.message || `Packy API ${status}`;
     throw new Error(`${path} — ${message}`);
   }
   return payload?.data ?? payload ?? null;
@@ -46,14 +50,15 @@ async function fetchPackyData(start, end, env) {
   const endTs = buildUnixTimestamp(end, true);
   const divisor = resolveQuotaDivisor(env);
 
-  const userData = await fetchPackyApi("/api/user/self", token, userId);
+  const userData = await fetchPackyApi("/api/user/self", token, userId, env);
   const remainingQuota = toNumber(userData?.quota);
   const balanceRemainingUsd = remainingQuota > 0 ? remainingQuota / divisor : null;
 
   const statData = await fetchPackyApi(
     `/api/log/self/stat?start_timestamp=${startTs}&end_timestamp=${endTs}&type=0`,
     token,
-    userId
+    userId,
+    env
   );
   const spentQuota = toNumber(statData?.quota);
   const costUsd = spentQuota > 0 ? spentQuota / divisor : 0;
@@ -65,9 +70,10 @@ async function fetchPackyData(start, end, env) {
   let pageNumber = 1;
   while (true) {
     const logPage = await fetchPackyApi(
-      `/api/log/self/?p=${pageNumber}&page_size=${pageSize}&type=0&token_name=&model_name=&start_timestamp=${startTs}&end_timestamp=${endTs}&group=`,
+      `/api/log/self?p=${pageNumber}&page_size=${pageSize}&type=0&token_name=&model_name=&start_timestamp=${startTs}&end_timestamp=${endTs}&group=`,
       token,
-      userId
+      userId,
+      env
     );
     if (pageNumber === 1) {
       queryCount = toNumber(logPage?.total);
