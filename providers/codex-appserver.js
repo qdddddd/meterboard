@@ -92,6 +92,7 @@ function requestRateLimits(binary, env) {
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let rateLimits = null;
 
     const finish = (error, value) => {
       if (settled) {
@@ -145,7 +146,11 @@ function requestRateLimits(binary, env) {
             finish(new Error(`account/rateLimits/read failed: ${JSON.stringify(message.error).slice(0, 200)}`));
             return;
           }
-          finish(null, message.result);
+          rateLimits = message.result;
+          send({ jsonrpc: "2.0", id: 3, method: "account/usage/read", params: null });
+        } else if (message.id === 3) {
+          // Usage is supplementary; a failure here must not lose the meters.
+          finish(null, { rateLimits, usage: message.error ? null : message.result });
           return;
         }
       }
@@ -177,7 +182,7 @@ async function readLiveRateLimits(env) {
     );
   }
 
-  const result = await requestRateLimits(binary, env);
+  const { rateLimits: result, usage } = await requestRateLimits(binary, env);
   const byLimitId = result?.rateLimitsByLimitId;
   const snapshot = byLimitId?.codex || result?.rateLimits || (byLimitId && Object.values(byLimitId)[0]);
 
@@ -185,7 +190,7 @@ async function readLiveRateLimits(env) {
     throw new Error("codex app-server returned no rate-limit snapshot");
   }
 
-  return { rateLimits: snapshot, binary };
+  return { rateLimits: snapshot, resetCredits: result?.rateLimitResetCredits || null, usage, binary };
 }
 
 module.exports = { readLiveRateLimits, resolveBinary };

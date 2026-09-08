@@ -103,6 +103,18 @@ makes that request itself and a systemd unit inherits none of the shell's proxy
 variables, the dashboard passes `SUBSCRIPTION_PROXY_URL` (or `HTTPS_PROXY`) down
 to the child process.
 
+#### Account stats
+
+Some plans expose a single rate-limit window, which leaves the card with one
+bar and little else. The same app-server session also calls
+`account/usage/read`, and the card lists what it returns: tokens today, tokens
+over the last 7 days, lifetime tokens, the current daily streak, and any
+available rate-limit reset credits. A failure there costs the stats only — the
+meters still render.
+
+Providers publish these as `meta.stats` (`{label, value}` entries), which the
+page renders generically, so any provider can add context under its meters.
+
 #### Offline fallback
 
 If the app server cannot be reached, the provider falls back to the rate-limit

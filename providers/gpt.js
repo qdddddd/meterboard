@@ -234,6 +234,66 @@ function metersFromSnapshot({ rateLimits, capturedAt }) {
   return meters;
 }
 
+function formatTokens(value) {
+  const tokens = Number(value);
+  if (!Number.isFinite(tokens) || tokens < 0) {
+    return null;
+  }
+  if (tokens >= 1e9) {
+    return `${(tokens / 1e9).toFixed(2)}B`;
+  }
+  if (tokens >= 1e6) {
+    return `${(tokens / 1e6).toFixed(1)}M`;
+  }
+  if (tokens >= 1e3) {
+    return `${(tokens / 1e3).toFixed(1)}K`;
+  }
+  return String(Math.round(tokens));
+}
+
+function shanghaiDate(date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+// The plan exposes a single rate-limit window, so the card would otherwise show
+// one bar and nothing else. These are the account's own reported figures.
+function statsFromUsage(usage, resetCredits) {
+  const stats = [];
+  const buckets = Array.isArray(usage?.dailyUsageBuckets) ? usage.dailyUsageBuckets : [];
+
+  const today = shanghaiDate(new Date());
+  const todayBucket = buckets.find((bucket) => bucket?.startDate === today);
+  stats.push({ label: "Today", value: `${formatTokens(todayBucket?.tokens || 0)} tokens` });
+
+  const cutoff = shanghaiDate(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
+  const weekTotal = buckets
+    .filter((bucket) => typeof bucket?.startDate === "string" && bucket.startDate >= cutoff)
+    .reduce((sum, bucket) => sum + (Number(bucket.tokens) || 0), 0);
+  stats.push({ label: "Last 7 days", value: `${formatTokens(weekTotal)} tokens` });
+
+  const lifetime = formatTokens(usage?.summary?.lifetimeTokens);
+  if (lifetime) {
+    stats.push({ label: "Lifetime", value: `${lifetime} tokens` });
+  }
+
+  const streak = Number(usage?.summary?.currentStreakDays);
+  if (Number.isFinite(streak) && streak > 0) {
+    stats.push({ label: "Streak", value: `${streak} day${streak === 1 ? "" : "s"}` });
+  }
+
+  const available = Number(resetCredits?.availableCount);
+  if (Number.isFinite(available) && available > 0) {
+    stats.push({ label: "Reset credits", value: `${available} available` });
+  }
+
+  return stats;
+}
+
 function formatPlanLabel(payload) {
   const plan = payload?.plan_type || payload?.planType || payload?.account?.plan_type;
   if (!plan) {
@@ -246,7 +306,7 @@ function formatPlanLabel(payload) {
 // Default source. Asks the local `codex` binary for the current account rate
 // limits -- the same live number the Codex UI shows.
 async function fetchFromAppServer(env) {
-  const { rateLimits, binary } = await readLiveRateLimits(env);
+  const { rateLimits, resetCredits, usage, binary } = await readLiveRateLimits(env);
 
   const meters = metersFromSnapshot({ rateLimits, capturedAt: null });
   if (meters.length === 0) {
@@ -259,7 +319,12 @@ async function fetchFromAppServer(env) {
     providerId: env.GPT_PROVIDER_ID || "gpt",
     planLabel: formatPlanLabel(rateLimits),
     meters,
-    extra: { displayName: "Codex", source: "app-server", codexBinary: binary },
+    extra: {
+      displayName: "Codex",
+      source: "app-server",
+      codexBinary: binary,
+      stats: statsFromUsage(usage, resetCredits),
+    },
   });
 }
 

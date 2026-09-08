@@ -291,6 +291,28 @@ button:disabled {
   gap: 0.55rem;
 }
 
+.provider-stats {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2rem 0.6rem;
+  margin: 0.15rem 0 0;
+  padding-top: 0.45rem;
+  border-top: 1px dashed var(--line);
+  font: 500 0.72rem "IBM Plex Mono", monospace;
+}
+
+.provider-stats dt {
+  color: var(--ink-soft);
+}
+
+.provider-stats dd {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 600;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .subscription-cost {
   margin: 0.15rem 0 0;
   padding-top: 0.45rem;

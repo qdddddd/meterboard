@@ -370,6 +370,24 @@ function renderSubscriptions(providers, errors, isFinalState, expectedCount) {
       meters.append(createMeter(meter));
     }
 
+    if (Array.isArray(meta.stats) && meta.stats.length > 0) {
+      const stats = document.createElement("dl");
+      stats.className = "provider-stats";
+
+      for (const stat of meta.stats) {
+        if (!stat || !stat.label) {
+          continue;
+        }
+        const term = document.createElement("dt");
+        term.textContent = stat.label;
+        const value = document.createElement("dd");
+        value.textContent = stat.value ?? "-";
+        stats.append(term, value);
+      }
+
+      meters.append(stats);
+    }
+
     // Informational only: a flat-rate plan bills nothing per token, so this is
     // what the same work would have cost at API prices.
     if (Number.isFinite(meta.costUsd)) {
