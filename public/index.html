@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Token Usage Cockpit</title>
+    <title>Usage Cockpit</title>
     <meta name="theme-color" content="#f3efe6" />
     <link rel="icon" href="/favicon-money.png?v=1" type="image/png" />
     <link rel="shortcut icon" href="/favicon-money.png?v=1" type="image/png" />
@@ -13,10 +13,10 @@
     <div class="backdrop" aria-hidden="true"></div>
     <main class="layout">
       <header class="hero panel">
-        <p class="eyebrow">AI spend and throughput</p>
-        <h1>Token Usage Cockpit</h1>
+        <p class="eyebrow">Usage and quotas</p>
+        <h1>Usage Cockpit</h1>
         <p class="tagline">
-          One view across providers. Track today's usage, spend, and balance without leaving the page.
+          One view across providers. Track today's usage, spend, balance, and quotas without leaving the page.
         </p>
         <div class="controls">
           <p class="today-pill">Today <span id="today-date">-</span></p>
@@ -24,19 +24,12 @@
         </div>
       </header>
 
-      <section class="kpis" id="kpis">
-        <article class="kpi panel">
-          <h2>Tokens used today</h2>
-          <p id="kpi-total-tokens">-</p>
-        </article>
-        <article class="kpi panel">
-          <h2>Total queries today</h2>
-          <p id="kpi-queries-today">-</p>
-        </article>
-        <article class="kpi panel">
-          <h2>Estimated cost</h2>
-          <p id="kpi-cost">-</p>
-        </article>
+      <section class="panel" id="subscriptions-panel" hidden>
+        <div class="section-head">
+          <h2>Subscription meters</h2>
+          <p id="subscription-status" class="hint"></p>
+        </div>
+        <div id="subscriptions" class="subscriptions"></div>
       </section>
 
       <section class="panel">

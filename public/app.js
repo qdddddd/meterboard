@@ -1,18 +1,19 @@
 const refreshButton = document.getElementById("refresh");
 const todayDateLabel = document.getElementById("today-date");
 
-const kpiTotalTokens = document.getElementById("kpi-total-tokens");
-const kpiCost = document.getElementById("kpi-cost");
-const kpiQueriesToday = document.getElementById("kpi-queries-today");
 
 const providersContainer = document.getElementById("providers");
 const providerStatus = document.getElementById("provider-status");
+const subscriptionsPanel = document.getElementById("subscriptions-panel");
+const subscriptionsContainer = document.getElementById("subscriptions");
+const subscriptionStatus = document.getElementById("subscription-status");
 const messages = document.getElementById("messages");
 
 let activeUsageStream = null;
 let activeUsageToken = 0;
 let currentDashboardState = null;
 const refreshingProviders = new Set();
+const subscriptionProviderIds = new Set();
 
 function formatInt(value) {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value || 0);
@@ -90,13 +91,6 @@ function createProviderHeading(label, dashboardUrl) {
   return heading;
 }
 
-function clearSummary() {
-  kpiTotalTokens.textContent = "-";
-  kpiCost.textContent = "-";
-  kpiQueriesToday.textContent = "-";
-  kpiQueriesToday.title = "";
-}
-
 function closeUsageStream() {
   if (!activeUsageStream) {
     return;
@@ -109,8 +103,10 @@ function closeUsageStream() {
 function resetDashboardForLoading() {
   currentDashboardState = null;
   refreshingProviders.clear();
-  clearSummary();
   providersContainer.innerHTML = "";
+  subscriptionsContainer.innerHTML = "";
+  subscriptionStatus.textContent = "";
+  subscriptionsPanel.hidden = true;
   providerStatus.textContent = "Preparing provider requests...";
 }
 
@@ -128,76 +124,6 @@ function removeProviderEntry(collection, providerName) {
   return (collection || []).filter((item) => item.provider !== providerName);
 }
 
-function buildCombinedTotals(providers) {
-  const totals = {
-    inputTokens: 0,
-    outputTokens: 0,
-    totalTokens: 0,
-    queryCount: 0,
-    costUsd: 0,
-  };
-
-  for (const provider of providers || []) {
-    const providerTotals = provider.totals || {};
-    totals.inputTokens += toSafeNumber(providerTotals.inputTokens);
-    totals.outputTokens += toSafeNumber(providerTotals.outputTokens);
-    totals.totalTokens += toSafeNumber(providerTotals.totalTokens);
-    totals.queryCount += toSafeNumber(providerTotals.queryCount);
-    totals.costUsd += toSafeNumber(providerTotals.costUsd);
-  }
-
-  totals.inputTokens = Math.round(totals.inputTokens);
-  totals.outputTokens = Math.round(totals.outputTokens);
-  totals.totalTokens = Math.round(totals.totalTokens);
-  totals.queryCount = Math.round(totals.queryCount);
-  totals.costUsd = Number(totals.costUsd.toFixed(4));
-  return totals;
-}
-
-function buildAccountSummary(providers, todayByProvider) {
-  const summary = {
-    balanceRemainingUsd: null,
-    balanceSpentTodayUsd: 0,
-    balanceExpirationDate: null,
-    tokensUsedToday: 0,
-    totalQueriesToday: 0,
-  };
-
-  let hasBalance = false;
-  const expirationCandidates = [];
-
-  for (const provider of providers || []) {
-    const account = provider.account || {};
-    if (Number.isFinite(account.balanceRemainingUsd)) {
-      hasBalance = true;
-      summary.balanceRemainingUsd = toSafeNumber(summary.balanceRemainingUsd) + toSafeNumber(account.balanceRemainingUsd);
-    }
-
-    if (typeof account.balanceExpirationDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(account.balanceExpirationDate)) {
-      expirationCandidates.push(account.balanceExpirationDate);
-    }
-  }
-
-  if (!hasBalance) {
-    summary.balanceRemainingUsd = null;
-  }
-
-  if (expirationCandidates.length > 0) {
-    summary.balanceExpirationDate = expirationCandidates.sort()[0];
-  }
-
-  for (const metric of Object.values(todayByProvider || {})) {
-    summary.balanceSpentTodayUsd += toSafeNumber(metric.costUsd);
-    summary.tokensUsedToday += toSafeNumber(metric.totalTokens);
-    summary.totalQueriesToday += toSafeNumber(metric.queryCount);
-  }
-
-  summary.balanceSpentTodayUsd = Number(summary.balanceSpentTodayUsd.toFixed(4));
-  summary.tokensUsedToday = Math.round(summary.tokensUsedToday);
-  summary.totalQueriesToday = Math.round(summary.totalQueriesToday);
-  return summary;
-}
-
 function recalculateDashboardState(state) {
   const nextState = state || {};
   nextState.providers = Array.isArray(nextState.providers) ? nextState.providers : [];
@@ -205,8 +131,6 @@ function recalculateDashboardState(state) {
   nextState.todayByProvider = nextState.todayByProvider && typeof nextState.todayByProvider === "object"
     ? nextState.todayByProvider
     : {};
-  nextState.totals = buildCombinedTotals(nextState.providers);
-  nextState.accountSummary = buildAccountSummary(nextState.providers, nextState.todayByProvider);
   nextState.fetchedAt = new Date().toISOString();
   nextState.streamComplete = true;
   return nextState;
@@ -217,8 +141,6 @@ function renderDashboardState(state) {
     return;
   }
 
-  renderTotals(state.totals || {});
-  renderAccountSummary(state.accountSummary, state.todayDate);
   updateTodayLabel(state.todayDate);
   renderProviders(state);
 }
@@ -255,24 +177,6 @@ function parseStreamPayload(event) {
   return JSON.parse(event.data);
 }
 
-function renderTotals(totals) {
-  kpiTotalTokens.textContent = formatInt(totals.totalTokens);
-  kpiCost.textContent = formatUsd(totals.costUsd);
-}
-
-function renderAccountSummary(summary, todayDate) {
-  if (!summary) {
-    kpiQueriesToday.textContent = "-";
-    return;
-  }
-
-  kpiQueriesToday.textContent = formatInt(summary.totalQueriesToday);
-
-  if (todayDate) {
-    kpiQueriesToday.title = `Calculated for ${todayDate}`;
-  }
-}
-
 function createProviderRefreshButton(providerName, isFinalState) {
   const isRefreshing = refreshingProviders.has(providerName);
   const button = document.createElement("button");
@@ -305,15 +209,253 @@ function createProviderRefreshButton(providerName, isFinalState) {
   return button;
 }
 
+// Subscription providers are metered by rate-limit windows instead of balance,
+// so they render as meters in their own panel rather than as spend cards.
+function isSubscriptionEntry(entry) {
+  if (!entry) {
+    return false;
+  }
+
+  if (entry.meta?.kind === "subscription" || entry.kind === "subscription") {
+    return true;
+  }
+
+  return subscriptionProviderIds.has(entry.provider);
+}
+
+function formatPercent(value) {
+  const percent = toSafeNumber(value);
+  return Number.isInteger(percent) ? String(percent) : percent.toFixed(1);
+}
+
+function formatResetTime(resetsAt) {
+  if (!resetsAt) {
+    return null;
+  }
+
+  const resetValue = Date.parse(resetsAt);
+  if (!Number.isFinite(resetValue)) {
+    return null;
+  }
+
+  const remainingMs = resetValue - Date.now();
+  if (remainingMs <= 0) {
+    return "resetting now";
+  }
+
+  const resetDate = new Date(resetValue);
+  const clock = resetDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  const remainingHours = remainingMs / 3600000;
+
+  if (remainingHours < 24) {
+    const countdown =
+      remainingHours < 1 ? `${Math.max(1, Math.round(remainingMs / 60000))}m` : `${Math.round(remainingHours)}h`;
+    return `resets ${clock} (${countdown})`;
+  }
+
+  const day = resetDate.toLocaleDateString([], { month: "short", day: "numeric" });
+  return `resets ${day} ${clock} (${Math.round(remainingHours / 24)}d)`;
+}
+
+function createMeter(meter) {
+  const row = document.createElement("div");
+  row.className = meter.isActive ? "meter meter-active" : "meter";
+
+  const head = document.createElement("div");
+  head.className = "meter-head";
+
+  const label = document.createElement("span");
+  label.className = "meter-label";
+  label.textContent = meter.label;
+
+  const value = document.createElement("span");
+  value.className = `meter-value severity-${meter.severity || "normal"}`;
+  value.textContent = `${formatPercent(meter.usedPercent)}%`;
+
+  head.append(label, value);
+
+  const track = document.createElement("div");
+  track.className = "meter-track";
+  track.setAttribute("role", "progressbar");
+  track.setAttribute("aria-valuemin", "0");
+  track.setAttribute("aria-valuemax", "100");
+  track.setAttribute("aria-valuenow", formatPercent(meter.usedPercent));
+  track.setAttribute("aria-label", `${meter.label} used`);
+
+  const fill = document.createElement("div");
+  fill.className = `meter-fill severity-${meter.severity || "normal"}`;
+  fill.style.width = `${Math.min(100, Math.max(0, toSafeNumber(meter.usedPercent)))}%`;
+  track.append(fill);
+
+  row.append(head, track);
+
+  const footParts = [];
+  if (meter.detail) {
+    footParts.push(meter.detail);
+  }
+
+  const resetText = formatResetTime(meter.resetsAt);
+  if (resetText) {
+    footParts.push(resetText);
+  }
+
+  if (footParts.length > 0) {
+    const foot = document.createElement("p");
+    foot.className = "meter-foot";
+    foot.textContent = footParts.join(" · ");
+    row.append(foot);
+  }
+
+  return row;
+}
+
+function createSubscriptionHeader(displayName, providerName, dashboardUrl, planLabel, isFinalState) {
+  const header = document.createElement("div");
+  header.className = "subscription-header";
+
+  const trailing = document.createElement("div");
+  trailing.className = "subscription-header-trailing";
+
+  if (planLabel) {
+    const plan = document.createElement("span");
+    plan.className = "plan-pill";
+    plan.textContent = planLabel;
+    trailing.append(plan);
+  }
+
+  trailing.append(createProviderRefreshButton(providerName, isFinalState));
+  header.append(createProviderHeading(displayName, dashboardUrl), trailing);
+  return header;
+}
+
+function renderSubscriptions(providers, errors, isFinalState, expectedCount) {
+  subscriptionsContainer.innerHTML = "";
+
+  const finishedCount = providers.length + errors.length;
+  if (expectedCount === 0 && finishedCount === 0) {
+    subscriptionsPanel.hidden = true;
+    subscriptionStatus.textContent = "";
+    return;
+  }
+
+  subscriptionsPanel.hidden = false;
+
+  // Wide cards (meta.layout === "wide") span the grid and sit on top, so their
+  // position is stable no matter which provider answers first on the stream.
+  const ordered = [...providers].sort(
+    (a, b) => (a.meta?.layout === "wide" ? 0 : 1) - (b.meta?.layout === "wide" ? 0 : 1)
+  );
+
+  for (const provider of ordered) {
+    const item = document.createElement("article");
+    item.className = provider.meta?.layout === "wide" ? "subscription-item subscription-item-wide" : "subscription-item";
+
+    const meta = provider.meta || {};
+    const account = provider.account || {};
+
+    item.append(
+      createSubscriptionHeader(
+        meta.displayName || provider.provider,
+        provider.provider,
+        meta.dashboardUrl,
+        account.planLabel,
+        isFinalState
+      )
+    );
+
+    const meters = document.createElement("div");
+    meters.className = "meters";
+
+    for (const meter of provider.meters || []) {
+      meters.append(createMeter(meter));
+    }
+
+    // Informational only: a flat-rate plan bills nothing per token, so this is
+    // what the same work would have cost at API prices.
+    if (Number.isFinite(meta.costUsd)) {
+      const cost = document.createElement("p");
+      cost.className = "subscription-cost";
+
+      const value = document.createElement("span");
+      value.className = "subscription-cost-value";
+      value.textContent = formatUsd(meta.costUsd);
+
+      const note = document.createElement("span");
+      const sessions = meta.costSessionCount;
+      const days = meta.costWindowDays;
+      note.textContent =
+        " at API rates" +
+        (Number.isFinite(sessions) ? ` · ${sessions} session${sessions === 1 ? "" : "s"}` : "") +
+        (Number.isFinite(days) ? ` active in ${days}d` : "");
+
+      cost.append(value, note);
+      cost.title = "What this usage would have cost at API prices. A subscription bills a flat rate, so it is not money spent.";
+      meters.append(cost);
+    }
+
+    if ((provider.meters || []).length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "provider-meta";
+      empty.textContent = "No rate-limit windows reported.";
+      meters.append(empty);
+    }
+
+    item.append(meters);
+    subscriptionsContainer.append(item);
+  }
+
+  for (const error of errors) {
+    const item = document.createElement("article");
+    item.className = "subscription-item";
+
+    item.append(createSubscriptionHeader(error.provider, error.provider, error.dashboardUrl, null, isFinalState));
+
+    const details = document.createElement("p");
+    details.className = "provider-meta status-error";
+    details.textContent = error.message;
+    item.append(details);
+
+    subscriptionsContainer.append(item);
+  }
+
+  if (!isFinalState && expectedCount > finishedCount) {
+    subscriptionStatus.textContent = `${finishedCount} of ${expectedCount} loaded`;
+  } else {
+    subscriptionStatus.textContent = `${providers.length} ok, ${errors.length} failed`;
+  }
+
+  if (finishedCount === 0 && !isFinalState) {
+    const waiting = document.createElement("p");
+    waiting.className = "hint";
+    waiting.textContent = "Reading subscription limits...";
+    subscriptionsContainer.append(waiting);
+  }
+}
+
 function renderProviders(data) {
   providersContainer.innerHTML = "";
 
   const isFinalState = data.streamComplete !== false;
-  const expectedProviderCount = Number.isFinite(data.expectedProviderCount)
-    ? data.expectedProviderCount
-    : (data.providers || []).length + (data.providerErrors || []).length;
+  const allProviders = data.providers || [];
+  const allErrors = data.providerErrors || [];
 
-  for (const provider of data.providers || []) {
+  const subscriptionProviders = allProviders.filter(isSubscriptionEntry);
+  const subscriptionErrors = allErrors.filter(isSubscriptionEntry);
+  const apiProviders = allProviders.filter((entry) => !isSubscriptionEntry(entry));
+  const apiErrors = allErrors.filter((entry) => !isSubscriptionEntry(entry));
+
+  const expectedSubscriptionCount = Number.isFinite(data.expectedSubscriptionCount)
+    ? data.expectedSubscriptionCount
+    : subscriptionProviders.length + subscriptionErrors.length;
+
+  renderSubscriptions(subscriptionProviders, subscriptionErrors, isFinalState, expectedSubscriptionCount);
+
+  const totalExpected = Number.isFinite(data.expectedProviderCount)
+    ? data.expectedProviderCount
+    : allProviders.length + allErrors.length;
+  const expectedProviderCount = Math.max(0, totalExpected - expectedSubscriptionCount);
+
+  for (const provider of apiProviders) {
     const item = document.createElement("article");
     item.className = "provider-item";
 
@@ -392,7 +534,7 @@ function renderProviders(data) {
     providersContainer.append(item);
   }
 
-  for (const error of data.providerErrors || []) {
+  for (const error of apiErrors) {
     const item = document.createElement("article");
     item.className = "provider-item";
 
@@ -414,8 +556,8 @@ function renderProviders(data) {
     providersContainer.append(item);
   }
 
-  const successCount = (data.providers || []).length;
-  const errorCount = (data.providerErrors || []).length;
+  const successCount = apiProviders.length;
+  const errorCount = apiErrors.length;
   const finishedCount = successCount + errorCount;
 
   if (!isFinalState && expectedProviderCount > 0) {
@@ -521,6 +663,7 @@ async function fetchUsage(options = {}) {
         providerErrors: [],
         todayByProvider: {},
         expectedProviderCount: 0,
+        expectedSubscriptionCount: subscriptionProviderIds.size,
         streamComplete: false,
       };
       const stream = new EventSource("/api/usage/stream");
@@ -551,6 +694,13 @@ async function fetchUsage(options = {}) {
 
         const payload = parseStreamPayload(event);
         state.expectedProviderCount = Array.isArray(payload.providers) ? payload.providers.length : 0;
+
+        subscriptionProviderIds.clear();
+        for (const providerId of payload.subscriptionProviders || []) {
+          subscriptionProviderIds.add(providerId);
+        }
+        state.expectedSubscriptionCount = subscriptionProviderIds.size;
+
         renderProviders(state);
       });
 
@@ -589,6 +739,7 @@ async function fetchUsage(options = {}) {
           ...payload,
           streamComplete: true,
           expectedProviderCount: state.expectedProviderCount,
+          expectedSubscriptionCount: state.expectedSubscriptionCount,
         };
         renderDashboardState(currentDashboardState);
         resolve(currentDashboardState);

@@ -9,6 +9,9 @@ const customProvider = require("./providers/custom");
 const rightCodeProvider = require("./providers/rightcode");
 const micuProvider = require("./providers/micu");
 const timiCcProvider = require("./providers/timicc");
+const claudeProvider = require("./providers/claude");
+const gptProvider = require("./providers/gpt");
+const v2freeProvider = require("./providers/v2free");
 const { createPackyProvider } = require("./providers/packy");
 
 const PROVIDERS = {
@@ -31,6 +34,21 @@ const PROVIDERS = {
   packy: {
     ...createPackyProvider("PACKY", "packy"),
     dashboardUrl: "https://www.packyapi.com/console",
+  },
+  claude: {
+    ...claudeProvider,
+    kind: "subscription",
+    dashboardUrl: "https://claude.ai/settings/usage",
+  },
+  gpt: {
+    ...gptProvider,
+    kind: "subscription",
+    dashboardUrl: "https://chatgpt.com/#settings/Account",
+  },
+  v2free: {
+    ...v2freeProvider,
+    kind: "subscription",
+    dashboardUrl: "https://v2free.org/user",
   },
 };
 
@@ -242,7 +260,7 @@ async function fetchSingleProvider(range, providerId) {
   let todayMetric = toTodayMetric(pickTodayUsageFromResult(providerResult, todayDate));
   let todayMetricError = null;
 
-  if (!todayMetric && !rangeContainsToday) {
+  if (!todayMetric && !rangeContainsToday && provider.kind !== "subscription") {
     try {
       const todayResult = await fetchProviderResult(provider, { start: todayDate, end: todayDate }, runtime);
       todayMetric = toTodayMetric(pickTodayUsageFromResult(todayResult, todayDate));
@@ -275,6 +293,9 @@ async function fetchUsageAcrossProviders(range, handlers = {}) {
   if (typeof handlers.onStart === "function") {
     handlers.onStart({
       providers: providers.map((provider) => provider.providerId),
+      subscriptionProviders: providers
+        .filter((provider) => provider.kind === "subscription")
+        .map((provider) => provider.providerId),
       todayDate,
       rangeContainsToday,
     });
@@ -297,6 +318,7 @@ async function fetchUsageAcrossProviders(range, handlers = {}) {
       } catch (error) {
         const providerError = {
           provider: provider.providerId,
+          kind: provider.kind || "api",
           message: safeProviderError(error),
           dashboardUrl: getProviderDashboardUrl(provider, process.env),
         };
@@ -338,7 +360,10 @@ async function fetchUsageAcrossProviders(range, handlers = {}) {
     }
   } else {
     const providerById = new Map(providers.map((provider) => [provider.providerId, provider]));
-    const missingTodayProviders = successful.filter((providerResult) => !pickTodayUsageFromResult(providerResult, todayDate));
+    const missingTodayProviders = successful.filter(
+      (providerResult) =>
+        providerResult.meta?.kind !== "subscription" && !pickTodayUsageFromResult(providerResult, todayDate)
+    );
 
     const todaySettled = await Promise.all(
       missingTodayProviders.map(async (providerResult) => {

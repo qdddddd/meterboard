@@ -2,7 +2,7 @@
   "name": "token-usage-dashboard",
   "version": "0.1.0",
   "private": true,
-  "description": "Web dashboard for token usage across multiple AI providers",
+  "description": "Web dashboard for usage, spend, and quotas across multiple providers",
   "scripts": {
     "start": "node server.js"
   },

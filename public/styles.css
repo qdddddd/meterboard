@@ -126,25 +126,6 @@ button:disabled {
   cursor: not-allowed;
 }
 
-.kpis {
-  display: grid;
-  gap: 0.8rem;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.kpi h2 {
-  margin: 0;
-  color: var(--ink-soft);
-  font-size: 0.87rem;
-  font-weight: 500;
-}
-
-.kpi p {
-  margin: 0.35rem 0 0;
-  font-size: clamp(1.2rem, 2.2vw, 1.6rem);
-  font-weight: 700;
-}
-
 .section-head {
   display: flex;
   justify-content: space-between;
@@ -288,6 +269,162 @@ button:disabled {
   color: var(--warn);
 }
 
+.subscriptions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+@media (max-width: 44rem) {
+  .subscriptions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.subscription-item {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fffffff0;
+  padding: 0.7rem 0.8rem;
+  display: grid;
+  align-content: start;
+  gap: 0.55rem;
+}
+
+.subscription-cost {
+  margin: 0.15rem 0 0;
+  padding-top: 0.45rem;
+  border-top: 1px dashed var(--line);
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+}
+
+.subscription-cost-value {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+
+.subscription-item-wide {
+  grid-column: 1 / -1;
+}
+
+.subscription-item h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  text-transform: capitalize;
+}
+
+.subscription-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.subscription-header-trailing {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.plan-pill {
+  padding: 0.15rem 0.5rem;
+  border: 1px solid #bfd5cf;
+  border-radius: 999px;
+  background: #f2fbf9;
+  color: var(--accent);
+  font: 600 0.68rem "IBM Plex Mono", monospace;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.meters {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.meter {
+  display: grid;
+  gap: 0.28rem;
+}
+
+.meter-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.meter-label {
+  color: var(--ink-soft);
+  font: 500 0.75rem "IBM Plex Mono", monospace;
+}
+
+.meter-active .meter-label {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.meter-value {
+  font: 700 0.85rem "IBM Plex Mono", monospace;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.meter-track {
+  height: 0.5rem;
+  border-radius: 999px;
+  background: #1f2f2d14;
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(100deg, var(--accent), #14b8a6);
+  transition: width 0.45s ease;
+}
+
+.meter-value.severity-warning,
+.meter-fill.severity-warning {
+  color: var(--accent-2);
+}
+
+.meter-fill.severity-warning {
+  background: linear-gradient(100deg, #f59e0b, var(--accent-2));
+}
+
+.meter-value.severity-critical,
+.meter-fill.severity-critical {
+  color: #b91c1c;
+}
+
+.meter-fill.severity-critical {
+  background: linear-gradient(100deg, #ef4444, #b91c1c);
+}
+
+.meter-foot {
+  margin: 0;
+  color: var(--ink-soft);
+  font: 500 0.68rem "IBM Plex Mono", monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.subscription-cost {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .meter-fill {
+    transition: none;
+  }
+}
+
 .message {
   border-radius: 10px;
   border: 1px solid;
@@ -308,18 +445,16 @@ button:disabled {
 }
 
 @media (max-width: 860px) {
-  .kpis {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .provider-subcards {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 
 @media (max-width: 620px) {
-  .kpis {
-    grid-template-columns: minmax(0, 1fr);
+  .meter-foot,
+  .subscription-cost {
+    white-space: normal;
+    overflow: visible;
   }
 
   .layout {
