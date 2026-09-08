@@ -103,14 +103,42 @@ makes that request itself and a systemd unit inherits none of the shell's proxy
 variables, the dashboard passes `SUBSCRIPTION_PROXY_URL` (or `HTTPS_PROXY`) down
 to the child process.
 
+#### Meters
+
+An account is metered by several limits at once — the base Codex quota plus
+per-model ones such as `GPT-5.3-Codex-Spark` — and each carries its own windows
+and reset clocks. The card renders every window of every limit reported in
+`rateLimitsByLimitId`, suffixing each label with the limit's own name so two
+windows that both read "Weekly" stay distinguishable.
+
+A window nobody has touched yet reports `resetsAt` as *now plus its own
+duration*, a placeholder that walks forward on every poll. Rendering it as a
+countdown would show a timer that never ticks down, so such a window is drawn
+at 0% with no reset clock. A window that has genuinely started keeps a fixed
+anchor across polls.
+
 #### Account stats
 
 Some plans expose a single rate-limit window, which leaves the card with one
 bar and little else. The same app-server session also calls
-`account/usage/read`, and the card lists what it returns: tokens today, tokens
-over the last 7 days, lifetime tokens, the current daily streak, and any
-available rate-limit reset credits. A failure there costs the stats only — the
-meters still render.
+`account/usage/read`, and the card lists what it returns: lifetime tokens, the
+current daily streak, and any available rate-limit reset credits. A failure
+there costs the stats only — the meters still render, and the card records
+`meta.usageUnavailable`.
+
+**The daily buckets lag a full day, so there is no "tokens today" to show.**
+`dailyUsageBuckets` never contains the current date: the eleven buckets sum to
+exactly `summary.lifetimeTokens`, and the whole aggregate stays frozen while the
+live rate-limit meter climbs. Days with no usage are omitted from the array
+entirely rather than reported as zero, so an absent bucket means "not
+aggregated yet" and can never be read as "you used nothing". The card therefore
+shows `Today — not reported yet` alongside the most recent day the account did
+report (`Sep 7 (latest)`), and leaves the live intraday signal to the meters.
+
+Reconstructing today's figure from the local rollout files is not a substitute:
+summed per-request deltas reproduce none of the account's daily buckets under
+any day boundary (UTC, Asia/Shanghai or US/Pacific), and this machine accounts
+for only about 70% of lifetime tokens.
 
 Providers publish these as `meta.stats` (`{label, value}` entries), which the
 page renders generically, so any provider can add context under its meters.

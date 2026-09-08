@@ -195,6 +195,59 @@ function metersFromPayload(payload) {
   return meters;
 }
 
+// An untouched window reports `resetsAt` as "now + its own duration", a
+// placeholder that walks forward on every poll. Rendering it as a countdown
+// shows a timer that never ticks down, so recognise it and drop the clock.
+// A window that has really started keeps a fixed anchor across polls.
+const UNSTARTED_TOLERANCE_SEC = 120;
+
+function isUnstartedWindow(source, resetsAt) {
+  const percent = Number(source?.used_percent ?? source?.usedPercent);
+  if (percent !== 0) {
+    return false;
+  }
+
+  const minutes = Number(source?.window_minutes ?? source?.windowMinutes ?? source?.windowDurationMins);
+  const resetsMs = Date.parse(resetsAt);
+  if (!Number.isFinite(minutes) || minutes <= 0 || !Number.isFinite(resetsMs)) {
+    return false;
+  }
+
+  const impliedStartSec = (resetsMs - Date.now()) / 1000 - minutes * 60;
+  return Math.abs(impliedStartSec) <= UNSTARTED_TOLERANCE_SEC;
+}
+
+// The account meters several limits at once -- the base Codex quota plus
+// per-model ones -- and each carries its own windows. Both can render as the
+// bare word "Weekly", so a limit's own name is suffixed to keep them apart.
+function metersFromBuckets(buckets, defaultLimitId) {
+  const entries = Object.entries(buckets || {}).filter(([, bucket]) => bucket && typeof bucket === "object");
+  entries.sort(([a], [b]) => (a === defaultLimitId ? -1 : b === defaultLimitId ? 1 : 0));
+
+  const meters = [];
+  for (const [limitId, bucket] of entries) {
+    const scope = bucket.limitName || bucket.limit_name || null;
+
+    for (const [key, fallbackLabel] of WINDOW_KEYS) {
+      const meter = readWindow(bucket[key], `${limitId}:${key}`, fallbackLabel);
+      if (!meter) {
+        continue;
+      }
+
+      if (scope) {
+        meter.label = `${meter.label} · ${scope}`;
+      }
+      if (isUnstartedWindow(bucket[key], meter.resetsAt)) {
+        meter.resetsAt = null;
+      }
+      meter.isActive = limitId === defaultLimitId && key === "primary";
+      meters.push(meter);
+    }
+  }
+
+  return meters;
+}
+
 // A snapshot is a point-in-time copy, so every meter is stamped with when it was
 // taken. Once a window's reset time has passed the recorded percentage describes
 // a window that no longer exists, so report it as reset rather than as current.
@@ -234,21 +287,28 @@ function metersFromSnapshot({ rateLimits, capturedAt }) {
   return meters;
 }
 
+// Thresholds sit at the rounding boundary, not the unit boundary, so a value
+// that would render as "1000.0K" is promoted to "1.0M" instead.
 function formatTokens(value) {
   const tokens = Number(value);
   if (!Number.isFinite(tokens) || tokens < 0) {
     return null;
   }
-  if (tokens >= 1e9) {
+  if (tokens >= 999.95e6) {
     return `${(tokens / 1e9).toFixed(2)}B`;
   }
-  if (tokens >= 1e6) {
+  if (tokens >= 999.95e3) {
     return `${(tokens / 1e6).toFixed(1)}M`;
   }
-  if (tokens >= 1e3) {
+  if (tokens >= 999.5) {
     return `${(tokens / 1e3).toFixed(1)}K`;
   }
   return String(Math.round(tokens));
+}
+
+function tokensText(value) {
+  const text = formatTokens(value);
+  return text === null ? null : `${text} tokens`;
 }
 
 function shanghaiDate(date) {
@@ -260,21 +320,75 @@ function shanghaiDate(date) {
   }).format(date);
 }
 
+// Buckets are keyed by plain `YYYY-MM-DD`, but clients have also written full
+// timestamps. Normalise once so the day lookup and the window filter can never
+// disagree about what a bucket's date is.
+function bucketDate(bucket) {
+  return String(bucket?.startDate ?? "").slice(0, 10);
+}
+
+function shiftDate(isoDate, days) {
+  const parsed = Date.parse(`${isoDate}T00:00:00Z`);
+  if (!Number.isFinite(parsed)) {
+    return isoDate;
+  }
+  return new Date(parsed + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function shortDate(isoDate) {
+  const parsed = Date.parse(`${isoDate}T00:00:00Z`);
+  if (!Number.isFinite(parsed)) {
+    return isoDate;
+  }
+  return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" }).format(parsed);
+}
+
 // The plan exposes a single rate-limit window, so the card would otherwise show
 // one bar and nothing else. These are the account's own reported figures.
+//
+// The account's daily aggregate lags: the current day is never present, and
+// days with no usage are omitted entirely rather than reported as zero. So an
+// absent bucket means "not aggregated yet", never "you used nothing" -- the
+// card must not turn that absence into a number.
 function statsFromUsage(usage, resetCredits) {
   const stats = [];
+  const hasUsage = usage && typeof usage === "object";
   const buckets = Array.isArray(usage?.dailyUsageBuckets) ? usage.dailyUsageBuckets : [];
 
   const today = shanghaiDate(new Date());
-  const todayBucket = buckets.find((bucket) => bucket?.startDate === today);
-  stats.push({ label: "Today", value: `${formatTokens(todayBucket?.tokens || 0)} tokens` });
+  const todayBucket = buckets.find((bucket) => bucketDate(bucket) === today);
+  const todayText = todayBucket ? tokensText(todayBucket.tokens) : null;
 
-  const cutoff = shanghaiDate(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
-  const weekTotal = buckets
-    .filter((bucket) => typeof bucket?.startDate === "string" && bucket.startDate >= cutoff)
-    .reduce((sum, bucket) => sum + (Number(bucket.tokens) || 0), 0);
-  stats.push({ label: "Last 7 days", value: `${formatTokens(weekTotal)} tokens` });
+  const latest = buckets.reduce(
+    (newest, bucket) => (!newest || bucketDate(bucket) > bucketDate(newest) ? bucket : newest),
+    null
+  );
+
+  if (todayText) {
+    stats.push({ label: "Today", value: todayText });
+  } else if (hasUsage) {
+    stats.push({ label: "Today", value: "not reported yet" });
+    const latestText = latest ? tokensText(latest.tokens) : null;
+    if (latestText) {
+      stats.push({ label: `${shortDate(bucketDate(latest))} (latest)`, value: latestText });
+    }
+  }
+
+  // Inclusive seven-day window ending today, derived from the same date string
+  // as the lookup above so the two can never straddle different days.
+  if (hasUsage && buckets.length > 0) {
+    const cutoff = shiftDate(today, -6);
+    const weekTotal = buckets
+      .filter((bucket) => {
+        const date = bucketDate(bucket);
+        return date >= cutoff && date <= today;
+      })
+      .reduce((sum, bucket) => sum + (Number(bucket.tokens) || 0), 0);
+    const weekText = tokensText(weekTotal);
+    if (weekText) {
+      stats.push({ label: "Last 7 days", value: weekText });
+    }
+  }
 
   const lifetime = formatTokens(usage?.summary?.lifetimeTokens);
   if (lifetime) {
@@ -294,10 +408,27 @@ function statsFromUsage(usage, resetCredits) {
   return stats;
 }
 
+// The wire values are single lowercase tokens, so the generic capitaliser turns
+// "prolite" into "Prolite" -- not a product name. Map the known plans and let
+// anything unrecognised fall through to the generic form.
+const PLAN_LABELS = {
+  free: "Free",
+  plus: "Plus",
+  pro: "Pro",
+  prolite: "Pro Lite",
+  business: "Business",
+  enterprise: "Enterprise",
+  edu: "Edu",
+};
+
 function formatPlanLabel(payload) {
   const plan = payload?.plan_type || payload?.planType || payload?.account?.plan_type;
   if (!plan) {
     return null;
+  }
+  const key = String(plan).toLowerCase().replace(/[\s_-]/g, "");
+  if (PLAN_LABELS[key]) {
+    return PLAN_LABELS[key];
   }
   const text = String(plan).replace(/_/g, " ");
   return text.charAt(0).toUpperCase() + text.slice(1);
@@ -306,9 +437,14 @@ function formatPlanLabel(payload) {
 // Default source. Asks the local `codex` binary for the current account rate
 // limits -- the same live number the Codex UI shows.
 async function fetchFromAppServer(env) {
-  const { rateLimits, resetCredits, usage, binary } = await readLiveRateLimits(env);
+  const { rateLimits, buckets, defaultLimitId, resetCredits, usage, binary } = await readLiveRateLimits(env);
 
-  const meters = metersFromSnapshot({ rateLimits, capturedAt: null });
+  // Prefer the per-limit map; fall back to the flattened snapshot for older
+  // binaries, whose response carries no `rateLimitsByLimitId` at all.
+  const meters = metersFromBuckets(buckets, defaultLimitId);
+  if (meters.length === 0) {
+    meters.push(...metersFromSnapshot({ rateLimits, capturedAt: null }));
+  }
   if (meters.length === 0) {
     throw new Error(
       `codex app-server returned no usable rate-limit windows (keys: ${Object.keys(rateLimits || {}).join(", ") || "none"}).`
@@ -323,6 +459,9 @@ async function fetchFromAppServer(env) {
       displayName: "Codex",
       source: "app-server",
       codexBinary: binary,
+      // The rate limits can arrive without the usage read; record that so a
+      // thinned-out stats block is diagnosable rather than mysterious.
+      usageUnavailable: !usage,
       stats: statsFromUsage(usage, resetCredits),
     },
   });

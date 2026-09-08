@@ -104,8 +104,19 @@ function requestRateLimits(binary, env) {
       error ? reject(error) : resolve(value);
     };
 
+    // The usage read is supplementary, so a stall or an early exit *after* the
+    // rate limits arrived must not throw them away -- doing so dropped the card
+    // onto its stale snapshot while live meters sat in hand.
+    const finishOrSalvage = (error) => {
+      if (rateLimits) {
+        finish(null, { rateLimits, usage: null });
+        return;
+      }
+      finish(error);
+    };
+
     const timer = setTimeout(
-      () => finish(new Error(`codex app-server did not answer within ${RPC_TIMEOUT_MS}ms`)),
+      () => finishOrSalvage(new Error(`codex app-server did not answer within ${RPC_TIMEOUT_MS}ms`)),
       RPC_TIMEOUT_MS
     );
 
@@ -162,7 +173,9 @@ function requestRateLimits(binary, env) {
 
     child.on("error", (error) => finish(new Error(`could not run ${binary}: ${error.message}`)));
     child.on("exit", (code) =>
-      finish(new Error(`codex app-server exited with ${code}${stderr ? `: ${stderr.trim().slice(0, 200)}` : ""}`))
+      finishOrSalvage(
+        new Error(`codex app-server exited with ${code}${stderr ? `: ${stderr.trim().slice(0, 200)}` : ""}`)
+      )
     );
 
     send({
@@ -184,13 +197,25 @@ async function readLiveRateLimits(env) {
 
   const { rateLimits: result, usage } = await requestRateLimits(binary, env);
   const byLimitId = result?.rateLimitsByLimitId;
+  const defaultLimitId = byLimitId?.codex ? "codex" : byLimitId ? Object.keys(byLimitId)[0] : null;
   const snapshot = byLimitId?.codex || result?.rateLimits || (byLimitId && Object.values(byLimitId)[0]);
 
   if (!snapshot) {
     throw new Error("codex app-server returned no rate-limit snapshot");
   }
 
-  return { rateLimits: snapshot, resetCredits: result?.rateLimitResetCredits || null, usage, binary };
+  // The account meters several limits at once -- the base Codex quota plus
+  // per-model ones, each with its own windows and reset clocks. Returning only
+  // the flattened default hid every limit but one, so hand back the whole map
+  // and let the caller decide what to render.
+  return {
+    rateLimits: snapshot,
+    buckets: byLimitId || null,
+    defaultLimitId,
+    resetCredits: result?.rateLimitResetCredits || null,
+    usage,
+    binary,
+  };
 }
 
 module.exports = { readLiveRateLimits, resolveBinary };
