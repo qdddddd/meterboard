@@ -306,7 +306,7 @@ async function fetchFromNetwork(env) {
         Authorization: `Bearer ${credentials.accessToken}`,
         "anthropic-beta": env.CLAUDE_OAUTH_BETA || OAUTH_BETA,
         accept: "application/json",
-        "User-Agent": "token-usage-dashboard",
+        "User-Agent": "meterboard",
       },
     });
 

@@ -1,4 +1,4 @@
-# Usage Cockpit
+# Meterboard
 
 A local dashboard showing today's usage, balance, and quotas across multiple providers — AI routing relays, AI subscriptions, and network services.
 

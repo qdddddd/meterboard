@@ -375,7 +375,7 @@ async function fetchFromNetwork(env) {
     headers: {
       Authorization: `Bearer ${credentials.accessToken}`,
       accept: "application/json",
-      "User-Agent": "token-usage-dashboard",
+      "User-Agent": "meterboard",
       ...(credentials.accountId ? { "chatgpt-account-id": credentials.accountId } : {}),
     },
   });

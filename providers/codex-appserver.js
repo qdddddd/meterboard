@@ -169,7 +169,7 @@ function requestRateLimits(binary, env) {
       jsonrpc: "2.0",
       id: 1,
       method: "initialize",
-      params: { clientInfo: { name: "token-usage-dashboard", version: "1.0.0" } },
+      params: { clientInfo: { name: "meterboard", version: "1.0.0" } },
     });
   });
 }

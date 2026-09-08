@@ -1,5 +1,5 @@
 {
-  "name": "token-usage-dashboard",
+  "name": "meterboard",
   "version": "0.1.0",
   "private": true,
   "description": "Web dashboard for usage, spend, and quotas across multiple providers",
