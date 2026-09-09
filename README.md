@@ -105,11 +105,10 @@ to the child process.
 
 #### Meters
 
-An account is metered by several limits at once — the base Codex quota plus
-per-model ones such as `GPT-5.3-Codex-Spark` — and each carries its own windows
-and reset clocks. The card renders every window of every limit reported in
-`rateLimitsByLimitId`, suffixing each label with the limit's own name so two
-windows that both read "Weekly" stay distinguishable.
+`rateLimitsByLimitId` reports several limits — the account's own Codex quota
+plus per-model ones such as `GPT-5.3-Codex-Spark`. Only the Codex quota is
+charted, since the per-model limits are not what gates ordinary use. That one
+limit still carries up to two windows of its own, and both are drawn.
 
 A window nobody has touched yet reports `resetsAt` as *now plus its own
 duration*, a placeholder that walks forward on every poll. Rendering it as a
@@ -126,14 +125,17 @@ current daily streak, and any available rate-limit reset credits. A failure
 there costs the stats only — the meters still render, and the card records
 `meta.usageUnavailable`.
 
-**The daily buckets lag a full day, so there is no "tokens today" to show.**
-`dailyUsageBuckets` never contains the current date: the eleven buckets sum to
-exactly `summary.lifetimeTokens`, and the whole aggregate stays frozen while the
-live rate-limit meter climbs. Days with no usage are omitted from the array
+**The daily buckets lag a full day, so there is normally no "tokens today" to
+show.** `dailyUsageBuckets` does not contain the current date: the buckets sum
+to exactly `summary.lifetimeTokens`, and the whole aggregate stays frozen while
+the live rate-limit meter climbs. Days with no usage are omitted from the array
 entirely rather than reported as zero, so an absent bucket means "not
-aggregated yet" and can never be read as "you used nothing". The card therefore
-shows `Today — not reported yet` alongside the most recent day the account did
-report (`Sep 7 (latest)`), and leaves the live intraday signal to the meters.
+aggregated yet" and can never be read as "you used nothing".
+
+The card therefore drops the `Today` row when the account has not reported that
+day, the way an unknown lifetime or streak is omitted rather than guessed, and
+shows the most recent day it *did* report under that day's own date
+(`Sep 8 (latest)`). Intraday movement is left to the meters, which do track it.
 
 Reconstructing today's figure from the local rollout files is not a substitute:
 summed per-request deltas reproduce none of the account's daily buckets under

@@ -217,32 +217,22 @@ function isUnstartedWindow(source, resetsAt) {
   return Math.abs(impliedStartSec) <= UNSTARTED_TOLERANCE_SEC;
 }
 
-// The account meters several limits at once -- the base Codex quota plus
-// per-model ones -- and each carries its own windows. Both can render as the
-// bare word "Weekly", so a limit's own name is suffixed to keep them apart.
-function metersFromBuckets(buckets, defaultLimitId) {
-  const entries = Object.entries(buckets || {}).filter(([, bucket]) => bucket && typeof bucket === "object");
-  entries.sort(([a], [b]) => (a === defaultLimitId ? -1 : b === defaultLimitId ? 1 : 0));
-
+// Only the account's own Codex limit is charted. The API also reports per-model
+// limits, but those are not the quota that gates ordinary use, so they stay off
+// the card. A single limit still carries up to two windows of its own.
+function metersFromLimit(limit) {
   const meters = [];
-  for (const [limitId, bucket] of entries) {
-    const scope = bucket.limitName || bucket.limit_name || null;
 
-    for (const [key, fallbackLabel] of WINDOW_KEYS) {
-      const meter = readWindow(bucket[key], `${limitId}:${key}`, fallbackLabel);
-      if (!meter) {
-        continue;
-      }
-
-      if (scope) {
-        meter.label = `${meter.label} · ${scope}`;
-      }
-      if (isUnstartedWindow(bucket[key], meter.resetsAt)) {
-        meter.resetsAt = null;
-      }
-      meter.isActive = limitId === defaultLimitId && key === "primary";
-      meters.push(meter);
+  for (const [key, fallbackLabel] of WINDOW_KEYS) {
+    const meter = readWindow(limit?.[key], key, fallbackLabel);
+    if (!meter) {
+      continue;
     }
+
+    if (isUnstartedWindow(limit[key], meter.resetsAt)) {
+      meter.resetsAt = null;
+    }
+    meters.push(meter);
   }
 
   return meters;
@@ -364,10 +354,12 @@ function statsFromUsage(usage, resetCredits) {
     null
   );
 
+  // A day the account has not aggregated yet gets no row at all, the way an
+  // unknown Lifetime or Streak is omitted rather than guessed. The most recent
+  // day it did report is shown instead, under its own date.
   if (todayText) {
     stats.push({ label: "Today", value: todayText });
-  } else if (hasUsage) {
-    stats.push({ label: "Today", value: "not reported yet" });
+  } else {
     const latestText = latest ? tokensText(latest.tokens) : null;
     if (latestText) {
       stats.push({ label: `${shortDate(bucketDate(latest))} (latest)`, value: latestText });
@@ -437,14 +429,9 @@ function formatPlanLabel(payload) {
 // Default source. Asks the local `codex` binary for the current account rate
 // limits -- the same live number the Codex UI shows.
 async function fetchFromAppServer(env) {
-  const { rateLimits, buckets, defaultLimitId, resetCredits, usage, binary } = await readLiveRateLimits(env);
+  const { rateLimits, resetCredits, usage, binary } = await readLiveRateLimits(env);
 
-  // Prefer the per-limit map; fall back to the flattened snapshot for older
-  // binaries, whose response carries no `rateLimitsByLimitId` at all.
-  const meters = metersFromBuckets(buckets, defaultLimitId);
-  if (meters.length === 0) {
-    meters.push(...metersFromSnapshot({ rateLimits, capturedAt: null }));
-  }
+  const meters = metersFromLimit(rateLimits);
   if (meters.length === 0) {
     throw new Error(
       `codex app-server returned no usable rate-limit windows (keys: ${Object.keys(rateLimits || {}).join(", ") || "none"}).`

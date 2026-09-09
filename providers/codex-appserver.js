@@ -197,25 +197,15 @@ async function readLiveRateLimits(env) {
 
   const { rateLimits: result, usage } = await requestRateLimits(binary, env);
   const byLimitId = result?.rateLimitsByLimitId;
-  const defaultLimitId = byLimitId?.codex ? "codex" : byLimitId ? Object.keys(byLimitId)[0] : null;
+  // The response also carries per-model limits; the card charts only the
+  // account's own Codex quota, so resolve to that one and drop the rest.
   const snapshot = byLimitId?.codex || result?.rateLimits || (byLimitId && Object.values(byLimitId)[0]);
 
   if (!snapshot) {
     throw new Error("codex app-server returned no rate-limit snapshot");
   }
 
-  // The account meters several limits at once -- the base Codex quota plus
-  // per-model ones, each with its own windows and reset clocks. Returning only
-  // the flattened default hid every limit but one, so hand back the whole map
-  // and let the caller decide what to render.
-  return {
-    rateLimits: snapshot,
-    buckets: byLimitId || null,
-    defaultLimitId,
-    resetCredits: result?.rateLimitResetCredits || null,
-    usage,
-    binary,
-  };
+  return { rateLimits: snapshot, resetCredits: result?.rateLimitResetCredits || null, usage, binary };
 }
 
 module.exports = { readLiveRateLimits, resolveBinary };
