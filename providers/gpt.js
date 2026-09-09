@@ -429,7 +429,7 @@ function formatPlanLabel(payload) {
 // Default source. Asks the local `codex` binary for the current account rate
 // limits -- the same live number the Codex UI shows.
 async function fetchFromAppServer(env) {
-  const { rateLimits, resetCredits, usage, binary } = await readLiveRateLimits(env);
+  const { rateLimits, resetCredits, usage, binary, transport, degradedFromWs } = await readLiveRateLimits(env);
 
   const meters = metersFromLimit(rateLimits);
   if (meters.length === 0) {
@@ -445,7 +445,11 @@ async function fetchFromAppServer(env) {
     extra: {
       displayName: "Codex",
       source: "app-server",
+      codexTransport: transport,
       codexBinary: binary,
+      // Set only when the long-lived server was unreachable and a spawned
+      // binary answered instead, so a silent transport downgrade stays visible.
+      degradedFromWs: degradedFromWs || null,
       // The rate limits can arrive without the usage read; record that so a
       // thinned-out stats block is diagnosable rather than mysterious.
       usageUnavailable: !usage,
@@ -554,7 +558,14 @@ async function fetchUsage({ env }) {
     try {
       return await fetchFromAppServer(env);
     } catch (liveError) {
-      const stale = fetchFromLocalSessions(env);
+      let stale;
+      try {
+        stale = fetchFromLocalSessions(env);
+      } catch (staleError) {
+        // Reporting only the snapshot failure sends the reader chasing missing
+        // session files when the real story is why the live read failed.
+        throw new Error(`${liveError.message} (on-disk snapshot fallback also failed: ${staleError.message})`);
+      }
       stale.meta.degradedFrom = liveError.message;
       return stale;
     }

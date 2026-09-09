@@ -4,6 +4,7 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 
 const { expandHome } = require("./subscription");
+const { readViaWebSocket } = require("./codex-ws");
 
 // Live source. `codex app-server` speaks JSON-RPC over stdio and answers
 // `account/rateLimits/read` with the same snapshot the Codex UI renders. Asking
@@ -187,7 +188,7 @@ function requestRateLimits(binary, env) {
   });
 }
 
-async function readLiveRateLimits(env) {
+async function readBySpawning(env) {
   const binary = resolveBinary(env);
   if (!binary) {
     throw new Error(
@@ -195,7 +196,39 @@ async function readLiveRateLimits(env) {
     );
   }
 
-  const { rateLimits: result, usage } = await requestRateLimits(binary, env);
+  const { rateLimits, usage } = await requestRateLimits(binary, env);
+  return { rateLimits, usage, transport: "spawn", detail: binary };
+}
+
+// Prefer the long-lived server: it is already authenticated upstream, so it
+// answers without a process spawn and without re-doing the OAuth dance. Falling
+// back to spawning our own keeps the card alive when that server is stopped,
+// which matters because it is an ordinary user process, not a managed service.
+async function readTransport(env) {
+  const mode = String(env.CODEX_TRANSPORT || "auto").trim().toLowerCase();
+
+  if (mode === "spawn") {
+    return readBySpawning(env);
+  }
+
+  try {
+    const { rateLimits, usage, url, tokenOrigin } = await readViaWebSocket(env);
+    return { rateLimits, usage, transport: "ws", detail: url, tokenOrigin };
+  } catch (wsError) {
+    if (mode === "ws") {
+      throw new Error(`codex app-server over WebSocket failed: ${wsError.message}`);
+    }
+    const spawned = await readBySpawning(env).catch((spawnError) => {
+      // Surface both causes: blaming only the spawn sends the reader chasing a
+      // missing binary when the real story is that the server is down.
+      throw new Error(`${spawnError.message} (WebSocket transport first failed: ${wsError.message})`);
+    });
+    return { ...spawned, degradedFromWs: wsError.message };
+  }
+}
+
+async function readLiveRateLimits(env) {
+  const { rateLimits: result, usage, transport, detail, tokenOrigin, degradedFromWs } = await readTransport(env);
   const byLimitId = result?.rateLimitsByLimitId;
   // The response also carries per-model limits; the card charts only the
   // account's own Codex quota, so resolve to that one and drop the rest.
@@ -205,7 +238,17 @@ async function readLiveRateLimits(env) {
     throw new Error("codex app-server returned no rate-limit snapshot");
   }
 
-  return { rateLimits: snapshot, resetCredits: result?.rateLimitResetCredits || null, usage, binary };
+  return {
+    rateLimits: snapshot,
+    resetCredits: result?.rateLimitResetCredits || null,
+    usage,
+    transport,
+    // `binary` is kept for the card's existing field; for the WebSocket
+    // transport it carries the server URL instead of a filesystem path.
+    binary: detail,
+    tokenOrigin: tokenOrigin || null,
+    degradedFromWs: degradedFromWs || null,
+  };
 }
 
 module.exports = { readLiveRateLimits, resolveBinary };

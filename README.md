@@ -88,14 +88,35 @@ retries once. See `V2FREE_*` in `.env.example`.
 
 ### How the `gpt` meter gets its numbers
 
-The dashboard never calls `chatgpt.com` itself. It runs the local `codex` binary
-as a JSON-RPC app server and asks it `account/rateLimits/read` — the same call
-the Codex UI makes, answered with the same live numbers. The binary
-authenticates with its own stored credentials and refreshes them the normal way,
-so the traffic is the official client doing an ordinary operation.
+The dashboard never calls `chatgpt.com` itself. It asks a `codex` app server for
+`account/rateLimits/read` — the same call the Codex UI makes, answered with the
+same live numbers. `codex` authenticates with its own stored credentials and
+refreshes them the normal way, so the traffic is the official client doing an
+ordinary operation.
 
 The meters report **used**; the Codex UI reports **remaining**. 12% used here is
 the same number as "88%" there.
+
+#### Transports
+
+Two ways to reach that app server, tried in order:
+
+1. **A long-lived server over WebSocket**, default `ws://127.0.0.1:8965`, as
+   started by `codex app-server --listen ws://... --ws-auth capability-token`.
+   Preferred: it already holds an authenticated upstream connection, so it
+   answers with no process spawn and no re-auth — roughly twice as fast in
+   practice. Auth is enforced, and the capability token must be presented as
+   `Authorization: Bearer <token>`; a missing, empty, wrong, or unprefixed token
+   is refused. The token is read from `CODEX_WS_TOKEN`, then
+   `CODEX_WS_TOKEN_FILE`, then `~/.config/agents/codex-serve.token`, then
+   `~/.config/codex-serve/token`.
+2. **A binary spawned per request** over stdio, used when that server is absent,
+   unreachable, or rejects the token. The reason is recorded in
+   `meta.degradedFromWs` so a silent transport downgrade stays visible.
+
+`CODEX_TRANSPORT` pins the choice: `auto` (default), `ws` to never spawn, or
+`spawn` to ignore the server. `meta.codexTransport` reports which one answered.
+Node's global `WebSocket` is used directly, so no dependency is added.
 
 `codex` is looked up on `PATH`, then under `~/.vscode/extensions/openai.chatgpt-*`,
 then `~/.local/bin`. Set `CODEX_BIN` to pin a specific one. Because the binary
