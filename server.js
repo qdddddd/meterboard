@@ -450,7 +450,7 @@ async function fetchUsageAcrossProviders(range, handlers = {}) {
   return payload;
 }
 
-function serveStaticFile(urlPath, response) {
+function serveStaticFile(urlPath, response, request) {
   const normalizedPath = urlPath === "/" ? "/index.html" : urlPath;
   const resolvedPath = path.join(PUBLIC_DIR, normalizedPath);
 
@@ -468,7 +468,31 @@ function serveStaticFile(urlPath, response) {
     const extension = path.extname(resolvedPath).toLowerCase();
     const contentType = MIME_TYPES[extension] || "application/octet-stream";
 
-    response.writeHead(200, { "Content-Type": contentType });
+    // A response carrying no validator lets the browser cache heuristically, so
+    // a reload could keep showing an old page after the dashboard was updated.
+    // `no-cache` still permits caching -- it only forces a revalidation, which
+    // is answered below with a 304 whenever the file is genuinely unchanged.
+    const etag = `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
+    const headers = {
+      "Content-Type": contentType,
+      "Cache-Control": "no-cache",
+      ETag: etag,
+      "Last-Modified": stat.mtime.toUTCString(),
+    };
+
+    const noneMatch = request?.headers["if-none-match"];
+    const modifiedSince = Date.parse(request?.headers["if-modified-since"]);
+    const unchanged = noneMatch
+      ? noneMatch === etag
+      : Number.isFinite(modifiedSince) && Math.floor(stat.mtimeMs / 1000) * 1000 <= modifiedSince;
+
+    if (unchanged) {
+      response.writeHead(304, headers);
+      response.end();
+      return;
+    }
+
+    response.writeHead(200, headers);
     fs.createReadStream(resolvedPath).pipe(response);
   });
 }
@@ -581,7 +605,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "GET") {
-    serveStaticFile(requestUrl.pathname, response);
+    serveStaticFile(requestUrl.pathname, response, request);
     return;
   }
 
