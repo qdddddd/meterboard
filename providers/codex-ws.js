@@ -15,6 +15,10 @@ const { expandHome } = require("./subscription");
 const DEFAULT_WS_URL = "ws://127.0.0.1:8965";
 const CONNECT_TIMEOUT_MS = 3000;
 const RPC_TIMEOUT_MS = 25000;
+// Once the meters are in hand, the supplementary usage read is the only thing
+// left to wait for. Holding the whole refresh at the full RPC timeout for it
+// would be paying an essential deadline for optional data.
+const USAGE_GRACE_MS = 5000;
 
 // The token path has moved between releases, so probe the known locations
 // rather than pinning one. CODEX_WS_TOKEN_FILE wins when set.
@@ -73,6 +77,9 @@ function requestOverWebSocket(url, token) {
 
     let settled = false;
     let rateLimits = null;
+    let rateLimitsDone = false;
+    let usage = null;
+    let usageDone = false;
 
     const finish = (error, value) => {
       if (settled) {
@@ -81,6 +88,7 @@ function requestOverWebSocket(url, token) {
       settled = true;
       clearTimeout(connectTimer);
       clearTimeout(rpcTimer);
+      clearTimeout(graceTimer);
       try {
         socket.close();
       } catch {
@@ -107,6 +115,13 @@ function requestOverWebSocket(url, token) {
       CONNECT_TIMEOUT_MS
     );
     let rpcTimer = null;
+    let graceTimer = null;
+
+    const settleIfReady = () => {
+      if (rateLimitsDone && usageDone) {
+        finish(null, { rateLimits, usage });
+      }
+    };
 
     const send = (message) => {
       try {
@@ -143,16 +158,26 @@ function requestOverWebSocket(url, token) {
           finish(new Error(`initialize failed: ${JSON.stringify(message.error).slice(0, 200)}`));
           return;
         }
+        // The two reads are independent and each costs an upstream round trip,
+        // so issue them together rather than chaining. Replies may come back in
+        // either order, which is why they are matched by id, not by arrival.
         send({ jsonrpc: "2.0", id: 2, method: "account/rateLimits/read", params: null });
+        send({ jsonrpc: "2.0", id: 3, method: "account/usage/read", params: null });
       } else if (message.id === 2) {
         if (message.error) {
           finish(new Error(`account/rateLimits/read failed: ${JSON.stringify(message.error).slice(0, 200)}`));
           return;
         }
         rateLimits = message.result;
-        send({ jsonrpc: "2.0", id: 3, method: "account/usage/read", params: null });
+        rateLimitsDone = true;
+        if (!usageDone) {
+          graceTimer = setTimeout(() => finishOrSalvage(new Error("usage read timed out")), USAGE_GRACE_MS);
+        }
+        settleIfReady();
       } else if (message.id === 3) {
-        finish(null, { rateLimits, usage: message.error ? null : message.result });
+        usage = message.error ? null : message.result;
+        usageDone = true;
+        settleIfReady();
       }
     });
 

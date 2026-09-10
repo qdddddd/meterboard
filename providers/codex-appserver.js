@@ -94,6 +94,9 @@ function requestRateLimits(binary, env) {
     let stderr = "";
     let settled = false;
     let rateLimits = null;
+    let rateLimitsDone = false;
+    let usage = null;
+    let usageDone = false;
 
     const finish = (error, value) => {
       if (settled) {
@@ -152,18 +155,29 @@ function requestRateLimits(binary, env) {
             finish(new Error(`initialize failed: ${JSON.stringify(message.error).slice(0, 200)}`));
             return;
           }
+          // Independent reads, one upstream round trip each, so send both at
+          // once. Replies can return in either order and are matched by id.
           send({ jsonrpc: "2.0", id: 2, method: "account/rateLimits/read", params: null });
+          send({ jsonrpc: "2.0", id: 3, method: "account/usage/read", params: null });
         } else if (message.id === 2) {
           if (message.error) {
             finish(new Error(`account/rateLimits/read failed: ${JSON.stringify(message.error).slice(0, 200)}`));
             return;
           }
           rateLimits = message.result;
-          send({ jsonrpc: "2.0", id: 3, method: "account/usage/read", params: null });
+          rateLimitsDone = true;
+          if (usageDone) {
+            finish(null, { rateLimits, usage });
+            return;
+          }
         } else if (message.id === 3) {
           // Usage is supplementary; a failure here must not lose the meters.
-          finish(null, { rateLimits, usage: message.error ? null : message.result });
-          return;
+          usage = message.error ? null : message.result;
+          usageDone = true;
+          if (rateLimitsDone) {
+            finish(null, { rateLimits, usage });
+            return;
+          }
         }
       }
     });
