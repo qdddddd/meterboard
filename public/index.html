@@ -18,7 +18,15 @@
         <p class="tagline">Usage, limits, and resets. All in one place.</p>
         <div class="controls">
           <p class="today-pill">Today <span id="today-date">-</span></p>
-          <button id="refresh" type="button">Refresh usage</button>
+          <button id="refresh" type="button" aria-busy="false">Refresh usage</button>
+          <span class="refresh-indicator" aria-hidden="true">
+            <svg viewBox="0 0 24 24" class="refresh-indicator-icon">
+              <path
+                d="M12 5a7 7 0 1 0 6.52 9.54h-2.13A5 5 0 1 1 12 7c1.3 0 2.48.5 3.37 1.32L13 10.7h6V5.2l-2.21 2.21A8.96 8.96 0 0 0 12 5Z"
+                fill="currentColor"
+              />
+            </svg>
+          </span>
         </div>
       </header>
 
@@ -38,7 +46,9 @@
         <div id="providers" class="providers"></div>
       </section>
 
-      <section id="messages"></section>
+      <!-- Values now change in place, which fires no accessibility event, so the
+           start and end of a refresh are announced from here instead. -->
+      <section id="messages" aria-live="polite"></section>
     </main>
     <script src="/app.js" defer></script>
   </body>

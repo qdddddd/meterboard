@@ -18,6 +18,13 @@
   box-sizing: border-box;
 }
 
+/* Cards are updated in place, so sections toggle with `hidden` instead of being
+   rebuilt. Several of them set `display` themselves, which would otherwise beat
+   the user-agent rule for `[hidden]`. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -124,6 +131,30 @@ button:hover {
 button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* The busy arrow sits beside the button rather than inside it, so the label
+   keeps its own width and the controls row never shifts. It holds its slot with
+   `visibility` so appearing and disappearing costs no layout either. */
+.refresh-indicator {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  visibility: hidden;
+}
+
+.refresh-indicator-icon {
+  width: 1.1rem;
+  height: 1.1rem;
+  display: block;
+}
+
+#refresh[aria-busy="true"] ~ .refresh-indicator {
+  visibility: visible;
+}
+
+#refresh[aria-busy="true"] ~ .refresh-indicator .refresh-indicator-icon {
+  animation: provider-spin 0.9s linear infinite;
 }
 
 .section-head {
@@ -444,6 +475,11 @@ button:disabled {
 @media (prefers-reduced-motion: reduce) {
   .meter-fill {
     transition: none;
+  }
+
+  .provider-refresh[aria-busy="true"] .provider-refresh-icon,
+  #refresh[aria-busy="true"] ~ .refresh-indicator .refresh-indicator-icon {
+    animation: none;
   }
 }
 
