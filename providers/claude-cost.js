@@ -17,7 +17,15 @@ const { expandHome } = require("./subscription");
 // "sessions active in the last N days" and the total is their full cost.
 const DEFAULT_WINDOW_DAYS = 7;
 const TAIL_BYTES = 512 * 1024;
-const MAX_FILES = 400;
+
+// Transcripts are append-only, so a file whose size and mtime are unchanged
+// still holds the same last cost-state. Remembering the result per file turns a
+// refresh from "read every transcript in the window" into "stat them, and read
+// only the few that moved" -- on a real tree, hundreds of megabytes down to a
+// handful of stats. The cache is a pure accelerator: delete it and the next
+// refresh rebuilds it with the same numbers.
+const CACHE_VERSION = 1;
+const DEFAULT_CACHE_PATH = path.join(os.homedir(), ".cache", "meterboard", "claude-cost.json");
 
 function projectsDir(env) {
   if (env.CLAUDE_PROJECTS_DIR) {
@@ -117,6 +125,43 @@ function lastCostState(filePath, size) {
   }
 }
 
+function cachePath(env) {
+  return env.CLAUDE_COST_CACHE_PATH ? expandHome(env.CLAUDE_COST_CACHE_PATH) : DEFAULT_CACHE_PATH;
+}
+
+function loadCache(env) {
+  if (String(env.CLAUDE_COST_CACHE || "").trim().toLowerCase() === "false") {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(cachePath(env), "utf8"));
+    // A stale layout is not worth migrating; rebuilding costs one slow refresh.
+    return parsed?.version === CACHE_VERSION && parsed.entries && typeof parsed.entries === "object"
+      ? parsed.entries
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+// Written via a temp file and renamed so a refresh interrupted mid-write cannot
+// leave a half-parsed cache behind. A failure here is silent by design: the
+// numbers are already computed, and losing the accelerator must not lose them.
+function saveCache(env, entries) {
+  if (String(env.CLAUDE_COST_CACHE || "").trim().toLowerCase() === "false") {
+    return;
+  }
+  const target = cachePath(env);
+  try {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    const temporary = `${target}.${process.pid}.tmp`;
+    fs.writeFileSync(temporary, JSON.stringify({ version: CACHE_VERSION, entries }));
+    fs.renameSync(temporary, target);
+  } catch {
+    // Unwritable cache directory; the scan still returned the right answer.
+  }
+}
+
 function readRecentCost(env) {
   const dir = projectsDir(env);
   if (!dir || !fs.existsSync(dir)) {
@@ -128,18 +173,42 @@ function readRecentCost(env) {
 
   const recent = collectTranscripts(dir)
     .filter((entry) => entry.mtimeMs >= cutoff)
-    .sort((a, b) => b.mtimeMs - a.mtimeMs)
-    .slice(0, MAX_FILES);
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+  const cached = loadCache(env) || {};
+  const fresh = {};
+  let reused = 0;
+  let scanned = 0;
 
   // A resumed session can appear in more than one transcript; its cost is
   // cumulative, so the largest value for a session id is the current total.
   const bySession = new Map();
   for (const entry of recent) {
-    const found = lastCostState(entry.filePath, entry.size);
+    const hit = cached[entry.filePath];
+    let found;
+
+    if (hit && hit.mtimeMs === entry.mtimeMs && hit.size === entry.size) {
+      found = hit.sessionId === null ? null : { sessionId: hit.sessionId, costUsd: hit.costUsd };
+      reused += 1;
+    } else {
+      found = lastCostState(entry.filePath, entry.size);
+      scanned += 1;
+    }
+
+    // Remember misses too, so a transcript that never carries a cost-state is
+    // not re-read in full on every single refresh.
+    fresh[entry.filePath] = found
+      ? { mtimeMs: entry.mtimeMs, size: entry.size, sessionId: found.sessionId, costUsd: found.costUsd }
+      : { mtimeMs: entry.mtimeMs, size: entry.size, sessionId: null, costUsd: 0 };
+
     if (found) {
       bySession.set(found.sessionId, Math.max(bySession.get(found.sessionId) || 0, found.costUsd));
     }
   }
+
+  // Only entries still inside the window are carried over, so the file cannot
+  // grow without bound as old transcripts age out.
+  saveCache(env, fresh);
 
   if (bySession.size === 0) {
     return null;
@@ -150,7 +219,7 @@ function readRecentCost(env) {
     costUsd += value;
   }
 
-  return { costUsd, sessionCount: bySession.size, windowDays };
+  return { costUsd, sessionCount: bySession.size, windowDays, filesScanned: scanned, filesReused: reused };
 }
 
-module.exports = { readRecentCost, projectsDir };
+module.exports = { readRecentCost, projectsDir, cachePath };

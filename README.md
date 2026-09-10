@@ -62,9 +62,20 @@ session began. **Per-day attribution is therefore impossible**, which is why the
 line reads "N sessions active in 7d" rather than "today": a long-running session
 contributes its entire cost, including days before the window.
 
+Every transcript in the window used to be re-read on every refresh — on a
+mature tree that is hundreds of megabytes of tail reads for numbers that mostly
+have not moved. Transcripts are append-only, so each file's last `cost-state` is
+now remembered against its size and mtime, and only files that actually changed
+are read again. Measured here: 424 ms down to 8 ms, with the total unchanged to
+the cent. The cache is a pure accelerator — delete it and the next refresh
+rebuilds it with identical numbers. A corrupt or stale-version file is ignored
+rather than migrated.
+
 | Variable | Effect |
 | --- | --- |
 | `CLAUDE_COST_WINDOW_DAYS` | Days of session activity to include (default 7) |
+| `CLAUDE_COST_CACHE_PATH` | Move the cache (default `~/.cache/meterboard/claude-cost.json`) |
+| `CLAUDE_COST_CACHE=false` | Re-read every transcript on every refresh |
 | `CLAUDE_SHOW_COST=false` | Hide the cost line entirely |
 | `CLAUDE_PROJECTS_DIR` | Override the transcript directory |
 | `CLAUDE_USAGE_CACHE_PATH` | Override the cache file |
