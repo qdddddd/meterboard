@@ -118,8 +118,10 @@ function parsePage(body) {
   const usedToday = parseTrafficGb(usedTodayText);
   const usedPast = parseTrafficGb(usedPastText);
 
+  // The page has shipped this list both spaced and unspaced, so the separators
+  // here are all tolerant rather than matching one of the two spellings.
   const pairs = {};
-  for (const match of body.matchAll(/\["([a-z_]+)", "([^"]*)"\]/g)) {
+  for (const match of body.matchAll(/\[\s*"([a-z_]+)"\s*,\s*"([^"]*)"\s*\]/g)) {
     pairs[match[1]] = match[2];
   }
 
