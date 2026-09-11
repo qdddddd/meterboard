@@ -472,14 +472,11 @@ button:disabled {
   text-overflow: ellipsis;
 }
 
+/* The turning arrows are the only sign that a refresh is running, so they keep
+   spinning here. Only the decorative meter tween is dropped. */
 @media (prefers-reduced-motion: reduce) {
   .meter-fill {
     transition: none;
-  }
-
-  .provider-refresh[aria-busy="true"] .provider-refresh-icon,
-  #refresh[aria-busy="true"] ~ .refresh-indicator .refresh-indicator-icon {
-    animation: none;
   }
 }
 
