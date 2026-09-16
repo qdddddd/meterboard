@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Meterboard</title>
-    <meta name="theme-color" content="#f3efe6" />
+    <meta name="theme-color" content="#efede4" />
     <link rel="icon" href="/favicon-money.png?v=1" type="image/png" />
     <link rel="shortcut icon" href="/favicon-money.png?v=1" type="image/png" />
     <link rel="stylesheet" href="/styles.css" />
@@ -12,27 +12,34 @@
   <body>
     <div class="backdrop" aria-hidden="true"></div>
     <main class="layout">
-      <header class="hero panel">
-        <p class="eyebrow">Usage and quotas</p>
-        <h1>Meterboard</h1>
-        <p class="tagline">Usage, limits, and resets. All in one place.</p>
-        <div class="controls">
-          <p class="today-pill">Today <span id="today-date">-</span></p>
-          <button id="refresh" type="button" aria-busy="false">Refresh usage</button>
-          <span class="refresh-indicator" aria-hidden="true">
-            <svg viewBox="0 0 24 24" class="refresh-indicator-icon">
-              <path
-                d="M12 5a7 7 0 1 0 6.52 9.54h-2.13A5 5 0 1 1 12 7c1.3 0 2.48.5 3.37 1.32L13 10.7h6V5.2l-2.21 2.21A8.96 8.96 0 0 0 12 5Z"
-                fill="currentColor"
-              />
-            </svg>
-          </span>
+      <header class="hero">
+        <div class="hero-lockup">
+          <h1>Meterboard</h1>
+          <p class="tagline">for Claude Code + Codex</p>
         </div>
+
+        <div class="hero-utility">
+          <p class="eyebrow">usage vs limits vs balances vs resets</p>
+          <div class="controls">
+            <p class="today-pill">Today <span id="today-date">-</span></p>
+            <button id="refresh" type="button" aria-busy="false">Refresh usage</button>
+            <span class="refresh-indicator" aria-hidden="true">
+              <svg viewBox="0 0 24 24" class="refresh-indicator-icon">
+                <path
+                  d="M12 5a7 7 0 1 0 6.52 9.54h-2.13A5 5 0 1 1 12 7c1.3 0 2.48.5 3.37 1.32L13 10.7h6V5.2l-2.21 2.21A8.96 8.96 0 0 0 12 5Z"
+                  fill="currentColor"
+                />
+              </svg>
+            </span>
+          </div>
+        </div>
+
+        <div class="signal-line" aria-hidden="true"><span></span></div>
       </header>
 
       <section class="panel" id="subscriptions-panel" hidden>
         <div class="section-head">
-          <h2>Subscription meters</h2>
+          <h2><span aria-hidden="true">01 /</span> Subscription meters</h2>
           <p id="subscription-status" class="hint"></p>
         </div>
         <div id="subscriptions" class="subscriptions"></div>
@@ -40,7 +47,7 @@
 
       <section class="panel">
         <div class="section-head">
-          <h2>Provider breakdown</h2>
+          <h2><span aria-hidden="true">02 /</span> Provider breakdown</h2>
           <p id="provider-status" class="hint"></p>
         </div>
         <div id="providers" class="providers"></div>
@@ -49,6 +56,12 @@
       <!-- Values now change in place, which fires no accessibility event, so the
            start and end of a refresh are announced from here instead. -->
       <section id="messages" aria-live="polite"></section>
+
+      <footer class="page-footer" aria-label="Dashboard information">
+        <span>METERBOARD / LOCAL</span>
+        <span class="footer-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>ASIA / SHANGHAI</span>
+      </footer>
     </main>
     <script src="/app.js" defer></script>
   </body>
