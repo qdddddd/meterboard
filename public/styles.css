@@ -99,16 +99,8 @@ body {
 .hero-utility {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1.5rem;
-}
-
-.eyebrow {
-  margin: 0;
-  color: #2e2f2e;
-  font-size: clamp(0.86rem, 1.8vw, 1rem);
-  line-height: 1.4;
-  letter-spacing: 0.025em;
 }
 
 .controls {
@@ -723,10 +715,6 @@ a:focus-visible {
 
   .tagline {
     font-size: 0.98rem;
-  }
-
-  .eyebrow {
-    font-size: 0.76rem;
   }
 
   .today-pill,
