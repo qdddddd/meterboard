@@ -613,26 +613,42 @@ a:focus-visible {
 }
 
 .message {
+  position: relative;
   margin: 0;
-  border: 1px solid;
+  border: 0;
+  border-top: 1px solid var(--rule);
   border-radius: 0;
-  padding: 0.8rem;
-  box-shadow: 3px 3px 0 var(--hard-shadow);
+  padding: 0.9rem 0 0;
+  background: transparent;
+  box-shadow: none;
   font-size: 0.7rem;
   font-weight: 500;
   line-height: 1.4;
 }
 
+.message::before {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 0 2px var(--paper);
+  content: "";
+  transform: translate(-50%, -50%);
+}
+
 .message.error {
-  border-color: var(--red);
-  background: #f8e9e3;
   color: #7f2c1f;
 }
 
+.message.error::before {
+  background: var(--red);
+}
+
 .message.info {
-  border-color: var(--cyan);
-  background: #e7f3f4;
-  color: #174e5f;
+  color: var(--ink);
 }
 
 .page-footer {
