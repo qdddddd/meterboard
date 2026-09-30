@@ -92,14 +92,16 @@ async function fetchUserPage(env) {
   });
 }
 
+// Only a signed-in session is offered a logout link. Keying on the traffic
+// labels instead would read every relabelling as an expired session.
 function isLoggedInPage(status, body) {
-  return status === 200 && typeof body === "string" && body.includes("剩余流量");
+  return status === 200 && typeof body === "string" && body.includes('href="/user/logout"');
 }
 
-const UNIT_TO_GB = { KB: 1 / 1024 ** 2, MB: 1 / 1024, GB: 1, TB: 1024 };
+const UNIT_TO_GB = { B: 1 / 1024 ** 3, KB: 1 / 1024 ** 2, MB: 1 / 1024, GB: 1, TB: 1024 };
 
 function parseTrafficGb(text) {
-  const match = /([\d.]+)\s*(KB|MB|GB|TB)/i.exec(text || "");
+  const match = /([\d.]+)\s*(KB|MB|GB|TB|B)/i.exec(text || "");
   if (!match) {
     return null;
   }
@@ -108,10 +110,11 @@ function parseTrafficGb(text) {
 }
 
 function parsePage(body) {
-    const anchor = "[^>]*>\\s*([\\d.]+\\s*[KMGT]B)\\s*<";
+  const anchor = "[^>]*>\\s*([\\d.]+\\s*[KMGT]?B)\\s*<";
   // Keep the page's own strings: the meter should quote the numbers the console
   // shows (过去已用 excludes today; 今日已用 still counts against the quota).
-  const remainingText = new RegExp(`剩余流量:[^<]*<a[^>]*id="remain"${anchor}`).exec(body)?.[1] || null;
+  // The remaining figure is found by its element id, whose label has changed.
+  const remainingText = new RegExp(`<a[^>]*\\bid="remain"${anchor}`).exec(body)?.[1] || null;
   const usedTodayText = new RegExp(`今日已用:\\s*<a${anchor}`).exec(body)?.[1] || null;
   const usedPastText = new RegExp(`过去已用:\\s*<a${anchor}`).exec(body)?.[1] || null;
   const remaining = parseTrafficGb(remainingText);
@@ -136,7 +139,7 @@ function buildResult(env, body) {
   const { remaining, usedToday, usedPast, remainingText, usedTodayText, usedPastText, pairs } = parsePage(body);
 
   if (remaining === null) {
-    throw new Error("could not find 剩余流量 on /user; the page layout may have changed.");
+    throw new Error("could not find #remain on /user; the page layout may have changed.");
   }
 
   const used = (usedToday || 0) + (usedPast || 0);
