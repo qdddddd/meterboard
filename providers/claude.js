@@ -26,12 +26,13 @@ const LEGACY_WINDOWS = [
   ["seven_day_sonnet", "weekly_sonnet", "Weekly (Sonnet)"],
 ];
 
+// The statusline script keeps this file in the tmpfs runtime dir, so its
+// rewrites every couple of minutes never reach the disk.
 function usageCachePath(env) {
   if (env.CLAUDE_USAGE_CACHE_PATH) {
     return expandHome(env.CLAUDE_USAGE_CACHE_PATH);
   }
-  const configDir = env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
-  return path.join(configDir, "cache", "usage-utilization.json");
+  return path.join("/run/user", String(process.getuid()), "claude-usage", "usage-utilization.json");
 }
 
 function credentialsPath(env) {
@@ -234,9 +235,10 @@ function metersFromUsagePayload(payload) {
   return meters;
 }
 
-// Default source. Claude Code caches the usage payload to disk as it runs, so
-// the dashboard reads that file and never calls api.anthropic.com. This is the
-// whole point: polling that endpoint from a dashboard got the account banned.
+// Default source. The Claude Code statusline script caches the usage payload as
+// it renders, so the dashboard reads that file and never calls api.anthropic.com.
+// This is the whole point: polling that endpoint from a dashboard got the
+// account banned.
 function fetchFromCache(env) {
   const filePath = usageCachePath(env);
 
@@ -245,7 +247,7 @@ function fetchFromCache(env) {
     capturedAt = new Date(fs.statSync(filePath).mtimeMs).toISOString();
   } catch {
     throw new Error(
-      `No usage cache at ${filePath}. Run any Claude Code command so it writes one, or set CLAUDE_USAGE_CACHE_PATH.`
+      `No usage cache at ${filePath}. The Claude Code statusline writes it on its next render; set CLAUDE_USAGE_CACHE_PATH if it lives elsewhere.`
     );
   }
 

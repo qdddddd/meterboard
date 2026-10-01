@@ -27,20 +27,22 @@ balance. They render in their own "Subscription meters" panel and contribute
 nothing to the spend and balance totals:
 
 - `gpt` — Codex / ChatGPT plan, read live via the local `codex` binary
-- `claude` — Claude Code / claude.ai plan, read from Claude Code's local usage cache
+- `claude` — Claude Code / claude.ai plan, read from the usage cache the Claude Code statusline writes
 - `v2free` — v2free.org traffic quota (GB per cycle rather than a rate-limit window)
 
 ### How the `claude` meter gets its numbers
 
-Claude Code writes the usage payload to
-`~/.claude/cache/usage-utilization.json` as it runs, and the provider reads that
-file. No request leaves the dashboard, and no token is involved. The plan
+The Claude Code statusline script (`~/.claude/statusline-command.sh`) fetches
+the usage payload in the background while a session is open, and keeps it in
+RAM at `/run/user/<uid>/claude-usage/usage-utilization.json`. The provider
+reads that file. No request leaves the dashboard, and no token is involved. The plan
 label comes from the account record in `~/.claude.json` (the credentials
 file's tier is frozen at token-issue time and goes stale across plan changes),
 and the meter still renders with neither.
 
-The cache is refreshed by Claude Code on its own schedule, not on every API
-call, so meters are stamped `as of <time>` from the file's mtime. Once a
+The statusline refreshes the cache at most every two minutes, backing off
+after failures, so meters are stamped `as of <time>` from the file's mtime.
+After a reboot the file is gone until the first statusline render. Once a
 window's reset has passed, its cached percentage describes a window that no
 longer exists, so the meter reports `window reset since <time>` at 0%.
 
@@ -79,7 +81,7 @@ rather than migrated.
 | `CLAUDE_SHOW_COST=false` | Hide the cost line entirely |
 | `CLAUDE_PROJECTS_DIR` | Override the transcript directory |
 | `CLAUDE_USAGE_CACHE_PATH` | Override the cache file |
-| `CLAUDE_CONFIG_DIR` | Override the directory the cache and credentials live under |
+| `CLAUDE_CONFIG_DIR` | Override the directory the credentials and transcripts live under |
 | `CLAUDE_CREDENTIALS_PATH` | Credentials file, a fallback for the plan label |
 
 `CLAUDE_USAGE_SOURCE=network` exists and should stay unset. It calls
