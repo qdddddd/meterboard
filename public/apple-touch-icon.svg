@@ -1,0 +1,19 @@
+<!-- Source of apple-touch-icon.png: render at 1024 px, flatten to opaque RGB and
+     downscale to 180 px. The wallet is the favicon-money.png glyph on its 512 grid,
+     in the page palette: paper ground, ink wallet, cyan clasp, card-shadow grey. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <mask id="cut" maskUnits="userSpaceOnUse" x="-64" y="0" width="640" height="512">
+      <rect x="-64" y="0" width="640" height="512" fill="#fff"/>
+      <path d="M384 128 H512 V384 H384 A128 128 0 0 1 384 128 Z" fill="#000"/>
+    </mask>
+  </defs>
+  <rect width="1024" height="1024" fill="#efede4"/>
+  <g transform="translate(0 -14) scale(2)">
+    <g transform="translate(14 14)" fill="#aaa79f"><rect x="0" y="64" width="480" height="384" rx="64"/><path d="M384 160 H512 V352 H384 A96 96 0 0 1 384 160 Z"/></g>
+    <path d="M384 128 H512 V384 H384 A128 128 0 0 1 384 128 Z" fill="#efede4"/>
+    <g mask="url(#cut)" fill="#171817"><rect x="0" y="64" width="480" height="384" rx="64"/></g>
+    <path d="M384 160 H512 V352 H384 A96 96 0 0 1 384 160 Z" fill="#171817"/>
+    <circle cx="384" cy="256" r="32" fill="#0b9fd3"/>
+  </g>
+</svg>
