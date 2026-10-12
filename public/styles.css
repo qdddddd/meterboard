@@ -14,7 +14,7 @@
   --green: #2f9268;
   --amber: #bd8900;
   --brown: #956641;
-  --violet: #7a5ab5;
+  --orange: #d2621a;
   --red: #b64532;
   --card-accent: var(--cyan);
   --hard-shadow: #aaa79f;
@@ -309,9 +309,10 @@ a:focus-visible {
 
 /* Claude keeps its own accent wherever it lands in the grid. The positional
    amber it used to get is also the warning colour, so its meters showed no
-   change at all on crossing into warning. */
+   change at all on crossing into warning. The orange sits midway between the
+   warning amber and the critical red, so both still read as a change. */
 .subscription-item[data-provider="claude"] {
-  --card-accent: var(--violet);
+  --card-accent: var(--orange);
 }
 
 .subscription-item {
