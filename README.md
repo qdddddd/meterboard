@@ -147,8 +147,10 @@ limit still carries up to two windows of its own, and both are drawn.
 A window nobody has touched yet reports `resetsAt` as *now plus its own
 duration*, a placeholder that walks forward on every poll. Rendering it as a
 countdown would show a timer that never ticks down, so such a window is drawn
-at 0% with no reset clock. A window that has genuinely started keeps a fixed
-anchor across polls.
+at 0% with `resets 7d after first use` (its own length) in place of a reset
+date, as is an unused window that arrives with no reset time at all. A window
+that has genuinely started keeps a fixed anchor across polls, and its meter
+shows the reset date and countdown like any other.
 
 #### Account stats
 

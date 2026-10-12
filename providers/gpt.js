@@ -113,6 +113,18 @@ function formatWindowLabel(windowMinutes, fallback) {
   return `${minutes}m window`;
 }
 
+// A window's length in the same units as the reset countdown: "7d", "5h", "90m".
+function formatWindowLength(windowMinutes) {
+  const minutes = Number(windowMinutes);
+  if (minutes % 1440 === 0) {
+    return `${minutes / 1440}d`;
+  }
+  if (minutes % 60 === 0) {
+    return `${minutes / 60}h`;
+  }
+  return `${minutes}m`;
+}
+
 function resetsAtFromSeconds(seconds) {
   const value = Number(seconds);
   if (!Number.isFinite(value) || value < 0) {
@@ -197,8 +209,10 @@ function metersFromPayload(payload) {
 
 // An untouched window reports `resetsAt` as "now + its own duration", a
 // placeholder that walks forward on every poll. Rendering it as a countdown
-// shows a timer that never ticks down, so recognise it and drop the clock.
-// A window that has really started keeps a fixed anchor across polls.
+// shows a timer that never ticks down, so recognise it and state the window's
+// length instead of a date. A window that has really started keeps a fixed
+// anchor across polls. An unused window with no anchor at all is read the same
+// way, so the card never goes blank under the meter.
 const UNSTARTED_TOLERANCE_SEC = 120;
 
 function isUnstartedWindow(source, resetsAt) {
@@ -208,9 +222,13 @@ function isUnstartedWindow(source, resetsAt) {
   }
 
   const minutes = Number(source?.window_minutes ?? source?.windowMinutes ?? source?.windowDurationMins);
-  const resetsMs = Date.parse(resetsAt);
-  if (!Number.isFinite(minutes) || minutes <= 0 || !Number.isFinite(resetsMs)) {
+  if (!Number.isFinite(minutes) || minutes <= 0) {
     return false;
+  }
+
+  const resetsMs = Date.parse(resetsAt);
+  if (!Number.isFinite(resetsMs)) {
+    return true;
   }
 
   const impliedStartSec = (resetsMs - Date.now()) / 1000 - minutes * 60;
@@ -229,8 +247,11 @@ function metersFromLimit(limit) {
       continue;
     }
 
-    if (isUnstartedWindow(limit[key], meter.resetsAt)) {
+    const source = limit[key];
+    if (isUnstartedWindow(source, meter.resetsAt)) {
+      const minutes = source.window_minutes ?? source.windowMinutes ?? source.windowDurationMins;
       meter.resetsAt = null;
+      meter.detail = `resets ${formatWindowLength(minutes)} after first use`;
     }
     meters.push(meter);
   }
