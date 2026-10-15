@@ -95,9 +95,11 @@ v2free.org is an SSPanel instance; `/user` serves the usage HTML only to a
 logged-in session. The provider reuses the session cookie maintained by
 `~/Documents/scripts/v2free_fetch.py` and parses the page's remaining / used /
 today figures into one traffic meter (percent of the cycle quota, reset date,
-plan label). When the cookie has expired it runs that script to re-login — the
+plan label). The site issues one-hour sessions, so the first refresh after an
+idle hour re-logs in: the provider runs that script with `--login-only` — the
 site's bot gate requires its Chrome impersonation, which Node cannot do — and
-retries once. See `V2FREE_*` in `.env.example`.
+fetches the page once more. A cookie whose own `expire_in` stamp has passed
+skips straight to the login. See `V2FREE_*` in `.env.example`.
 
 ### How the `gpt` meter gets its numbers
 

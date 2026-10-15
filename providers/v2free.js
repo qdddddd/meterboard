@@ -12,7 +12,12 @@ const { buildMeter, expandHome, formatCaptureTime, subscriptionResult } = requir
 // site's bot gate, which plain Node cannot), so this provider only ever reads
 // the cookie file and shells out to that script when the session has expired.
 const USER_URL = "https://v2free.org/user";
-const REFRESH_TIMEOUT_MS = 100000;
+// A login is two round trips through the proxy; the script's own timeouts bound
+// it at about a minute, so this only catches a hung process.
+const REFRESH_TIMEOUT_MS = 70000;
+// The site issues one-hour sessions. A cookie this close to its stamped expiry
+// is treated as gone, which skips a /user fetch that could only bounce.
+const EXPIRY_MARGIN_SEC = 60;
 
 function cookiePath(env) {
   return expandHome(env.V2FREE_COOKIE_FILE || "~/.config/clash/v2free.cookie");
@@ -24,7 +29,9 @@ function refreshCommand(env) {
   }
   const python = path.join(os.homedir(), ".venv", "bin", "python");
   const script = path.join(os.homedir(), "Documents", "scripts", "v2free_fetch.py");
-  return `${python} ${script} /dev/null`;
+  // `--login-only` mints the cookie and stops: the script's default mode would
+  // also download the Clash subscription, with sleeps and retries around it.
+  return `${python} ${script} --login-only`;
 }
 
 function readCookie(env) {
@@ -33,6 +40,16 @@ function readCookie(env) {
   } catch {
     return "";
   }
+}
+
+// The cookie carries its own expiry as unix seconds (`expire_in=...`). Unknown
+// or unparseable means "don't know", and the page gets asked as before.
+function cookieExpired(cookie) {
+  const match = /(?:^|;\s*)expire_in=(\d{9,11})(?:;|$)/.exec(cookie);
+  if (!match) {
+    return false;
+  }
+  return Number(match[1]) <= Date.now() / 1000 + EXPIRY_MARGIN_SEC;
 }
 
 // The refresh script needs the same proxy the dashboard uses; under systemd
@@ -185,7 +202,11 @@ function buildResult(env, body) {
 
 async function fetchUsage({ env }) {
   try {
-    let { status, body } = await fetchUserPage(env);
+    let status = 0;
+    let body = "";
+    if (!cookieExpired(readCookie(env))) {
+      ({ status, body } = await fetchUserPage(env));
+    }
 
     if (!isLoggedInPage(status, body)) {
       await refreshCookie(env);
