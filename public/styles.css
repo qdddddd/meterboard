@@ -313,15 +313,15 @@ a:focus-visible {
   position: relative;
   border: 2px solid var(--ink);
   border-top: 8px solid var(--card-accent);
-  border-radius: 0;
+  border-radius: 8px;
   background: rgb(245 242 234 / 94%);
-  box-shadow: 5px 5px 0 var(--hard-shadow);
+  box-shadow: 4px 4px 0 var(--hard-shadow);
   transition: box-shadow 140ms ease, transform 140ms ease;
 }
 
 .subscription-item:hover,
 .provider-item:hover {
-  box-shadow: 7px 7px 0 var(--hard-shadow);
+  box-shadow: 6px 6px 0 var(--hard-shadow);
   transform: translate(-1px, -1px);
 }
 
