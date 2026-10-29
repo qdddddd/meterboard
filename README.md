@@ -252,6 +252,33 @@ node server.js
 
 5. Open `http://localhost:8088`
 
+### macOS service
+
+On `bernoulli`, the server runs from `~/Documents/Projects/ty/meterboard` under
+the login agent `~/Library/LaunchAgents/com.qdu.meterboard.plist`. It starts at
+login and restarts if the process exits. Logs go to
+`~/Library/Logs/meterboard.log`.
+The old `meterboard.service` on poisson is stopped and disabled; its project
+and service files remain there for rollback.
+
+Open `http://localhost:8088` on the Mac, or `http://bernoulli:8088` from
+duduwall's Wi-Fi. The native widget uses localhost. The Mac must be awake and
+the user logged in for the server to respond.
+
+The local `.env` points `CLAUDE_USAGE_CACHE_PATH` at the expanded macOS
+`$TMPDIR/claude-usage-<uid>/usage-utilization.json` path written by
+`~/.claude/statusline.sh`. The existing Codex login agent supplies live usage
+over WebSocket. V2Free uses `~/Documents/scripts/v2free_fetch.py`, with
+`curl_cffi` installed in `~/.venv` and private credentials in
+`~/.config/clash/v2free.creds`. The Mac uses its normal network route, so
+`SUBSCRIPTION_PROXY_URL` is empty.
+
+After changing the server or `.env`, restart it with:
+
+```sh
+launchctl kickstart -k "gui/$(id -u)/com.qdu.meterboard"
+```
+
 ## How it works
 
 - The server defaults to today's date in `Asia/Shanghai` when fetching usage.
