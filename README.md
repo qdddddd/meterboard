@@ -254,29 +254,60 @@ node server.js
 
 ### macOS service
 
-On `bernoulli`, the server runs from `~/Documents/Projects/ty/meterboard` under
-the login agent `~/Library/LaunchAgents/com.qdu.meterboard.plist`. It starts at
-login and restarts if the process exits. Logs go to
-`~/Library/Logs/meterboard.log`.
-The old `meterboard.service` on poisson is stopped and disabled; its project
-and service files remain there for rollback.
+To keep the server running on a Mac, run it as a launchd login agent. Save
+this as `~/Library/LaunchAgents/com.example.meterboard.plist`. Replace the
+paths with your own; launchd does not expand `~` or `$HOME`.
 
-Open `http://localhost:8088` on the Mac, or `http://bernoulli:8088` from
-duduwall's Wi-Fi. The native widget uses localhost. The Mac must be awake and
-the user logged in for the server to respond.
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.example.meterboard</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/node</string>
+    <string>/path/to/meterboard/server.js</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/path/to/meterboard</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/you/Library/Logs/meterboard.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/you/Library/Logs/meterboard.log</string>
+</dict>
+</plist>
+```
 
-The local `.env` points `CLAUDE_USAGE_CACHE_PATH` at the expanded macOS
-`$TMPDIR/claude-usage-<uid>/usage-utilization.json` path written by
-`~/.claude/statusline.sh`. The existing Codex login agent supplies live usage
-over WebSocket. V2Free uses `~/Documents/scripts/v2free_fetch.py`, with
-`curl_cffi` installed in `~/.venv` and private credentials in
-`~/.config/clash/v2free.creds`. The Mac uses its normal network route, so
-`SUBSCRIPTION_PROXY_URL` is empty.
+Load it once with
+`launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.example.meterboard.plist`.
+The agent then starts at login and restarts if the process exits. Put
+`PATH` entries for `codex` and any other binaries the meters call into
+`EnvironmentVariables`, because launchd does not read your shell profile. The
+Mac must be awake and the user logged in for the server to respond. Other
+devices on the network can reach it at `http://<mac-hostname>:8088`.
+
+On macOS, set `CLAUDE_USAGE_CACHE_PATH` to the expanded
+`$TMPDIR/claude-usage-<uid>/usage-utilization.json` path, because `.env`
+values are not shell-expanded. Leave `SUBSCRIPTION_PROXY_URL` empty when the
+Mac's normal network route reaches the providers.
 
 After changing the server or `.env`, restart it with:
 
 ```sh
-launchctl kickstart -k "gui/$(id -u)/com.qdu.meterboard"
+launchctl kickstart -k "gui/$(id -u)/com.example.meterboard"
 ```
 
 ## How it works
