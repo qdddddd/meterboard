@@ -930,7 +930,7 @@ async function refreshProvider(providerName) {
   try {
     const params = new URLSearchParams({ provider: providerName });
 
-    const response = await fetch(`/api/provider?${params.toString()}`);
+    const response = await fetch(`api/provider?${params.toString()}`);
     const payload = await response.json();
 
     // A full refresh started while this was in flight, so its data is newer.
@@ -1028,7 +1028,7 @@ async function fetchUsage(options = {}) {
 
   try {
     const payload = await new Promise((resolve, reject) => {
-      const stream = new EventSource("/api/usage/stream");
+      const stream = new EventSource("api/usage/stream");
       let settled = false;
 
       activeUsageStream = stream;
