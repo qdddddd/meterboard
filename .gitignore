@@ -30,3 +30,6 @@ test-results/
 # OS/editor files
 .DS_Store
 Thumbs.db
+
+# Swift build output (widget, icons)
+.build/
