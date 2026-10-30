@@ -66,8 +66,11 @@ struct ProviderReading: Decodable {
     let meters: [UsageMeter]
     let meta: Metadata?
 
+    // Claude's all-models weekly limit outranks the active one, which is
+    // often a model-scoped bucket such as Weekly · Fable.
     var primary: UsageMeter? {
-        meters.first(where: { $0.isActive == true }) ?? meters.first
+        meters.first(where: { $0.id.hasPrefix("weekly_all") })
+            ?? meters.first(where: { $0.isActive == true }) ?? meters.first
     }
 
     var capturedAt: Date? { MeterDates.parse(meta?.snapshotAt) }

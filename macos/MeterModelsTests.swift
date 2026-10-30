@@ -14,6 +14,9 @@ enum MeterModelsTests {
         expect(envelope.provider.accepts(providerID: "claude"), "respect provider aliases")
         expect(!envelope.provider.accepts(providerID: "gpt"), "reject wrong provider")
         expect(envelope.provider.primary?.id == "weekly", "select active limit")
+        let scoped = #"{"provider":"claude","meters":[{"id":"session-0","label":"Session (5h)","usedPercent":2,"isActive":false},{"id":"weekly_all-1","label":"Weekly (all models)","usedPercent":29,"isActive":false},{"id":"weekly_scoped-2","label":"Weekly · Fable","usedPercent":46,"isActive":true}]}"#
+        let scopedReading = try JSONDecoder().decode(ProviderReading.self, from: Data(scoped.utf8))
+        expect(scopedReading.primary?.id == "weekly_all-1", "all-models weekly outranks an active scoped limit")
         expect(envelope.provider.capturedAt != nil, "retain snapshot time")
         expect(envelope.provider.meters[0].resetText(at: now) == "Resets in 4h 10m", "fractional ISO timestamps and countdown")
         func meter(_ fragment: String) throws -> UsageMeter {
