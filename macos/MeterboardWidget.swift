@@ -95,11 +95,13 @@ final class WidgetDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func positionPanel() {
         guard let screen = preferredScreen() else { return }
-        panel.level = staysOnTop ? .floating : .normal
         panel.hasShadow = !fillsDisplay
         // Avoid unexpectedly covering the main monitor when the Wokyis is unplugged.
         let dedicated = screen.localizedName.localizedCaseInsensitiveContains("Wokyis") || preferences.string(forKey: "displayName") == screen.localizedName
-        if fillsDisplay && dedicated {
+        let fills = fillsDisplay && dedicated
+        // Filling a dedicated display sits above its menu bar and Dock, like full screen.
+        panel.level = !staysOnTop ? .normal : fills ? NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1) : .floating
+        if fills {
             panel.setFrame(screen.frame, display: true)
         } else {
             let bounds = screen.visibleFrame.insetBy(dx: 24, dy: 24)
@@ -154,7 +156,7 @@ final class WidgetDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     @objc func toggleTop() {
         preferences.set(!staysOnTop, forKey: "alwaysOnTop")
-        panel.level = staysOnTop ? .floating : .normal
+        positionPanel()
     }
     @objc func selectDisplay(_ sender: NSMenuItem) {
         preferences.set(sender.representedObject as? String, forKey: "displayName")
