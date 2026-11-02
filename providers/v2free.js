@@ -28,7 +28,7 @@ function refreshCommand(env) {
     return env.V2FREE_REFRESH_CMD;
   }
   const python = path.join(os.homedir(), ".venv", "bin", "python");
-  const script = path.join(os.homedir(), "Documents", "scripts", "v2free_fetch.py");
+  const script = path.join(os.homedir(), "Documents", "Scripts", "v2free_fetch.py");
   // `--login-only` mints the cookie and stops: the script's default mode would
   // also download the Clash subscription, with sleeps and retries around it.
   return `${python} ${script} --login-only`;
