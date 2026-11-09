@@ -52,7 +52,8 @@ struct UsageMeter: Decodable, Identifiable {
     }
 
     // Claude's extra-usage and spend-cap meters measure money, not a limit
-    // window, so they never lead the gauge or take a ring.
+    // window, so while a limit window exists they neither lead the gauge
+    // nor take a ring.
     var isCredit: Bool { id == "extra_usage" || id == "spend" }
 
     // The short name drawn along a gauge ring: the model or surface scope of
