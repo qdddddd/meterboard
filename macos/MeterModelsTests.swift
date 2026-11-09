@@ -17,6 +17,14 @@ enum MeterModelsTests {
         let scoped = #"{"provider":"claude","meters":[{"id":"session-0","label":"Session (5h)","usedPercent":2,"isActive":false},{"id":"weekly_all-1","label":"Weekly (all models)","usedPercent":29,"isActive":false},{"id":"weekly_scoped-2","label":"Weekly · Fable","usedPercent":46,"isActive":true}]}"#
         let scopedReading = try JSONDecoder().decode(ProviderReading.self, from: Data(scoped.utf8))
         expect(scopedReading.primary?.id == "weekly_all-1", "all-models weekly outranks an active scoped limit")
+        expect(scopedReading.rings.map(\.id) == ["weekly_all-1", "session-0", "weekly_scoped-2"], "primary ring outermost, then payload order")
+        expect(scopedReading.rings.map(\.ringLabel) == ["ALL MODELS", "SESSION", "FABLE"], "short ring labels")
+        let crowded = #"{"provider":"claude","meters":[{"id":"session-0","label":"Session (5h)","usedPercent":8},{"id":"weekly_all-1","label":"Weekly (all models)","usedPercent":63},{"id":"spend","label":"Spend cap","usedPercent":12,"isActive":true},{"id":"extra_usage","label":"Extra usage (monthly)","usedPercent":3,"isActive":true},{"id":"weekly_opus-2","label":"Weekly (Opus)","usedPercent":41},{"id":"weekly_scoped-3","label":"Weekly · Fable","usedPercent":55}]}"#
+        let crowdedReading = try JSONDecoder().decode(ProviderReading.self, from: Data(crowded.utf8))
+        expect(crowdedReading.rings.map(\.id) == ["weekly_all-1", "session-0", "weekly_opus-2"], "rings skip credit meters and stop at three")
+        let credited = #"{"provider":"claude","meters":[{"id":"session-0","label":"Session (5h)","usedPercent":8,"isActive":false},{"id":"extra_usage","label":"Extra usage (monthly)","usedPercent":3,"isActive":true}]}"#
+        let creditedReading = try JSONDecoder().decode(ProviderReading.self, from: Data(credited.utf8))
+        expect(creditedReading.primary?.id == "session-0", "a credit meter never leads the gauge")
         expect(envelope.provider.capturedAt != nil, "retain snapshot time")
         expect(envelope.provider.meters[0].resetText(at: now) == "Resets in 4h 10m", "fractional ISO timestamps and countdown")
         func meter(_ fragment: String) throws -> UsageMeter {

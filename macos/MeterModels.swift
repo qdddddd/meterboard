@@ -50,6 +50,19 @@ struct UsageMeter: Decodable, Identifiable {
         guard let value = percent(at: now) else { return "—" }
         return value.rounded() == value ? String(Int(value)) : String(format: "%.1f", value)
     }
+
+    // Claude's extra-usage and spend-cap meters measure money, not a limit
+    // window, so they never lead the gauge or take a ring.
+    var isCredit: Bool { id == "extra_usage" || id == "spend" }
+
+    // The short name drawn along a gauge ring: the model or surface scope of
+    // a scoped limit, the bracketed qualifier of a weekly one, else the
+    // window name without its bracket.
+    var ringLabel: String {
+        var name = label.components(separatedBy: " · ").last ?? label
+        if name.hasPrefix("Weekly (") { name.removeFirst(8) }
+        return name.prefix(while: { $0 != "(" && $0 != ")" }).trimmingCharacters(in: .whitespaces).uppercased()
+    }
 }
 
 struct ProviderReading: Decodable {
@@ -70,7 +83,16 @@ struct ProviderReading: Decodable {
     // often a model-scoped bucket such as Weekly · Fable.
     var primary: UsageMeter? {
         meters.first(where: { $0.id.hasPrefix("weekly_all") })
-            ?? meters.first(where: { $0.isActive == true }) ?? meters.first
+            ?? meters.first(where: { $0.isActive == true && !$0.isCredit }) ?? meters.first
+    }
+
+    // Concentric gauge rings, outermost first: the primary limit, then the
+    // other rate-limit windows in payload order. Credit meters stay in the
+    // rows, and three rings is as many as leave room for the centre reading.
+    var rings: [UsageMeter] {
+        guard let primary else { return [] }
+        let others = meters.filter { $0.id != primary.id && !$0.isCredit }
+        return Array(([primary] + others).prefix(3))
     }
 
     var capturedAt: Date? { MeterDates.parse(meta?.snapshotAt) }
