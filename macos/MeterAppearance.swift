@@ -30,9 +30,10 @@ enum MeterStyle {
     }
 }
 
-struct MeterRow: View {
+// The time left until a meter resets, as a "↻ 1d 15h" tag; the full reset
+// text shows on hover.
+struct ResetTag: View {
     let meter: UsageMeter
-    let color: Color
     let now: Date
 
     private var countdown: String {
@@ -42,6 +43,21 @@ struct MeterRow: View {
         return full.replacingOccurrences(of: "Resets in ", with: "")
     }
 
+    var body: some View {
+        if !countdown.isEmpty {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.clockwise").font(.system(size: 9))
+                Text(countdown).font(MeterStyle.font(11))
+            }.foregroundStyle(MeterPalette.soft).fixedSize().help(meter.resetText(at: now))
+        }
+    }
+}
+
+struct MeterRow: View {
+    let meter: UsageMeter
+    let color: Color
+    let now: Date
+
     // No bar: the gauge above is the chart, so a row is text only — name,
     // time to reset, percentage.
     var body: some View {
@@ -49,12 +65,7 @@ struct MeterRow: View {
             Text(meter.label).font(MeterStyle.font(14, "Medium"))
                 .lineLimit(1).minimumScaleFactor(0.8)
             Spacer(minLength: 4)
-            if !countdown.isEmpty {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.clockwise").font(.system(size: 9))
-                    Text(countdown).font(MeterStyle.font(11))
-                }.foregroundStyle(MeterPalette.soft).fixedSize().help(meter.resetText(at: now))
-            }
+            ResetTag(meter: meter, now: now)
             Text(meter.percentText(at: now) + (meter.percent(at: now) == nil ? "" : "%"))
                 .font(MeterStyle.font(15, "SemiBold")).foregroundStyle(MeterStyle.tint(meter, accent: color, at: now))
         }.frame(height: 20)
@@ -70,8 +81,9 @@ struct RingLabel: View {
     let text: String
     let radius: CGFloat
     let clearance: CGFloat
-    private let size: CGFloat = 8.5
-    private var advance: CGFloat { size * 0.6 + 0.6 }
+    let size: CGFloat
+    // Plex Mono's 0.6em advance plus a little letter spacing.
+    private var advance: CGFloat { size * 0.67 }
 
     var body: some View {
         let budget = Int((radius * .pi / 2 - clearance) / advance)
@@ -98,35 +110,37 @@ struct MeterGauge: View {
     let accent: Color
     let labeled: Bool
     let now: Date
-    private let diameter: CGFloat = 160
-    private var band: CGFloat { labeled ? 12 : 11 }
+    // Every size here was tuned on a 160pt gauge and scales with it.
+    private let diameter: CGFloat = 192
+    private var unit: CGFloat { diameter / 160 }
+    private var band: CGFloat { 12 * unit }
 
     var body: some View {
         let count = max(rings.count, 1)
-        let step = band + 3
+        let step = band + 3 * unit
         let inner = diameter - 2 * step * CGFloat(count - 1) - band
         let number = rings.first?.percentText(at: now) ?? "—"
         let percent = rings.first?.percent(at: now)
         // Fit the reading inside the innermost ring: the width budget covers
         // decimals and 100, the height budget a stack of three rings.
         let digits = CGFloat(number.count) * 0.6 + (percent == nil ? 0 : 0.225)
-        let numberSize = min(48, inner * 0.42, (inner * 0.86 - 1) / digits)
+        let numberSize = min(48 * unit, inner * 0.42, (inner * 0.86 - 1) / digits)
         ZStack {
             ForEach(0..<count, id: \.self) { index in
                 ring(index < rings.count ? rings[index] : nil, width: diameter - 2 * step * CGFloat(index))
             }
-            VStack(spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 1) {
+            VStack(spacing: 3 * unit) {
+                HStack(alignment: .firstTextBaseline, spacing: unit) {
                     Text(number).font(MeterStyle.font(numberSize, "Medium"))
                     if percent != nil { Text("%").font(MeterStyle.font(numberSize * 0.375)).foregroundStyle(MeterPalette.soft) }
                 }
-                // Inside three rings a spaced 11pt "NO READING" would run
+                // Inside three rings a widely spaced "NO READING" would run
                 // onto the innermost band.
-                Text(caption).font(MeterStyle.font(count > 2 ? 9 : 11, "Medium")).tracking(count > 2 ? 0.5 : 2)
-                    .foregroundStyle(MeterPalette.soft)
+                Text(caption).font(MeterStyle.font((count > 2 ? 9 : 11) * unit, "Medium"))
+                    .tracking((count > 2 ? 0.5 : 2) * unit).foregroundStyle(MeterPalette.soft)
             }
         }
-        .frame(width: diameter, height: diameter)
+        .frame(width: diameter + band, height: diameter + band)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(rings.isEmpty ? caption.capitalized : rings.map { meter in
             meter.percent(at: now) == nil ? "\(meter.label): no reading" : "\(meter.label): \(meter.percentText(at: now)) percent used"
@@ -144,7 +158,7 @@ struct MeterGauge: View {
                 // Clear the fill's round start cap, then recolour the letters
                 // wherever the fill runs underneath them: paper reads on the
                 // brown and red fills, ink on amber.
-                let label = RingLabel(text: meter.ringLabel, radius: width / 2, clearance: band / 2 + 3)
+                let label = RingLabel(text: meter.ringLabel, radius: width / 2, clearance: band / 2 + 3 * unit, size: 8.5 * unit)
                 label.foregroundStyle(MeterPalette.ink.opacity(0.72))
                 label.foregroundStyle(tint == MeterPalette.amber ? MeterPalette.ink : MeterPalette.paper)
                     .mask(fill.stroke(style: stroke))
@@ -189,30 +203,38 @@ struct ProviderCard: View {
                 .padding(.horizontal, 6).padding(.vertical, 3)
                 .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous).strokeBorder(state.color, lineWidth: 1)).padding(.top, 7)
 
-            MeterGauge(rings: state.id == "claude" ? state.reading?.rings ?? [] : [primary].compactMap { $0 },
-                       caption: percent == nil ? (state.loading ? "CONNECTING" : "NO READING") : "USED",
-                       accent: state.color, labeled: state.id == "claude", now: now)
-                .frame(maxWidth: .infinity).padding(.vertical, 10)
-                .opacity(state.error == nil ? 1 : 0.55)
+            // The centre reading needs no row of its own; only its reset
+            // time, under the gauge.
+            VStack(spacing: 6) {
+                MeterGauge(rings: state.id == "claude" ? state.reading?.rings ?? [] : [primary].compactMap { $0 },
+                           caption: percent == nil ? (state.loading ? "CONNECTING" : "NO READING") : "USED",
+                           accent: state.color, labeled: state.id == "claude", now: now)
+                if let primary { ResetTag(meter: primary, now: now) }
+            }
+            .frame(maxWidth: .infinity).padding(.top, 6).padding(.bottom, 8)
+            .opacity(state.error == nil ? 1 : 0.55)
 
             ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 14) {
                     if let reading = state.reading, !reading.meters.isEmpty {
-                        VStack(spacing: 8) {
-                            ForEach(Array(reading.meters.enumerated()), id: \.offset) { _, meter in
-                                MeterRow(meter: meter, color: state.color, now: now)
-                            }
-                        }.opacity(state.error == nil ? 1 : 0.55)
+                        let others = reading.meters.filter { $0.id != primary?.id }
+                        if !others.isEmpty {
+                            VStack(spacing: 8) {
+                                ForEach(Array(others.enumerated()), id: \.offset) { _, meter in
+                                    MeterRow(meter: meter, color: state.color, now: now)
+                                }
+                            }.opacity(state.error == nil ? 1 : 0.55)
+                        }
                         if state.id == "v2free", let detail = primary?.detail {
                             Text(detail).font(MeterStyle.font(12)).foregroundStyle(MeterPalette.soft)
-                                .fixedSize(horizontal: false, vertical: true).padding(.top, 14)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         if state.id == "gpt", let stat = reading.meta?.stats?.first(where: { $0.label == "Last 7 days" }) {
                             HStack {
                                 Text(stat.label).foregroundStyle(MeterPalette.soft)
                                 Spacer()
                                 Text(stat.value).foregroundStyle(MeterPalette.ink)
-                            }.font(MeterStyle.font(12)).padding(.top, 20)
+                            }.font(MeterStyle.font(12))
                         }
                     } else {
                         VStack(alignment: .leading, spacing: 8) {
