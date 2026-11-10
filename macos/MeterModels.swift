@@ -46,6 +46,14 @@ struct UsageMeter: Decodable, Identifiable {
         return "Resets in \(minutes / 1440)d \((minutes % 1440) / 60)h"
     }
 
+    // The short form of resetText for the "↻" tag.
+    func countdown(at now: Date) -> String {
+        if resetPassed(at: now) { return "Updating" }
+        let full = resetText(at: now)
+        if full.contains("after first use") { return "First use" }
+        return full.replacingOccurrences(of: "Resets in ", with: "")
+    }
+
     func percentText(at now: Date) -> String {
         guard let value = percent(at: now) else { return "—" }
         return value.rounded() == value ? String(Int(value)) : String(format: "%.1f", value)

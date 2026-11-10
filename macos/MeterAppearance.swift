@@ -36,14 +36,8 @@ struct ResetTag: View {
     let meter: UsageMeter
     let now: Date
 
-    private var countdown: String {
-        let full = meter.resetText(at: now)
-        if meter.resetPassed(at: now) { return "Updating" }
-        if full.contains("after first use") { return "First use" }
-        return full.replacingOccurrences(of: "Resets in ", with: "")
-    }
-
     var body: some View {
+        let countdown = meter.countdown(at: now)
         if !countdown.isEmpty {
             HStack(spacing: 4) {
                 Image(systemName: "arrow.clockwise").font(.system(size: 9))
@@ -57,6 +51,7 @@ struct MeterRow: View {
     let meter: UsageMeter
     let color: Color
     let now: Date
+    let showsReset: Bool
 
     // No bar: the gauge above is the chart, so a row is text only — name,
     // time to reset, percentage.
@@ -65,7 +60,7 @@ struct MeterRow: View {
             Text(meter.label).font(MeterStyle.font(14, "Medium"))
                 .lineLimit(1).minimumScaleFactor(0.8)
             Spacer(minLength: 4)
-            ResetTag(meter: meter, now: now)
+            if showsReset { ResetTag(meter: meter, now: now) }
             Text(meter.percentText(at: now) + (meter.percent(at: now) == nil ? "" : "%"))
                 .font(MeterStyle.font(15, "SemiBold")).foregroundStyle(MeterStyle.tint(meter, accent: color, at: now))
         }.frame(height: 20)
@@ -205,13 +200,13 @@ struct ProviderCard: View {
 
             // The centre reading needs no row of its own; only its reset
             // time, under the gauge.
-            VStack(spacing: 6) {
+            VStack(spacing: 10) {
                 MeterGauge(rings: state.id == "claude" ? state.reading?.rings ?? [] : [primary].compactMap { $0 },
                            caption: percent == nil ? (state.loading ? "CONNECTING" : "NO READING") : "USED",
                            accent: state.color, labeled: state.id == "claude", now: now)
                 if let primary { ResetTag(meter: primary, now: now) }
             }
-            .frame(maxWidth: .infinity).padding(.top, 6).padding(.bottom, 8)
+            .frame(maxWidth: .infinity).padding(.top, 16).padding(.bottom, 14)
             .opacity(state.error == nil ? 1 : 0.55)
 
             ScrollView(.vertical) {
@@ -220,8 +215,10 @@ struct ProviderCard: View {
                         let others = reading.meters.filter { $0.id != primary?.id }
                         if !others.isEmpty {
                             VStack(spacing: 8) {
+                                // A reset time the gauge already shows is not repeated.
                                 ForEach(Array(others.enumerated()), id: \.offset) { _, meter in
-                                    MeterRow(meter: meter, color: state.color, now: now)
+                                    MeterRow(meter: meter, color: state.color, now: now,
+                                             showsReset: meter.countdown(at: now) != primary?.countdown(at: now))
                                 }
                             }.opacity(state.error == nil ? 1 : 0.55)
                         }
