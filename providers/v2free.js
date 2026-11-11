@@ -138,22 +138,48 @@ function parsePage(body) {
   const usedToday = parseTrafficGb(usedTodayText);
   const usedPast = parseTrafficGb(usedPastText);
 
-  // The page has shipped this list both spaced and unspaced, so the separators
-  // here are all tolerant rather than matching one of the two spellings.
+  // The account fields (plan, VIP class, expiry, next reset) come from the
+  // support chat's setup script. The page first listed them as ["key", "value"]
+  // pairs, shipped both spaced and unspaced, and now hands them to Chatwoot as
+  // one setCustomAttributes({...}) object, so both shapes are read.
   const pairs = {};
   for (const match of body.matchAll(/\[\s*"([a-z_]+)"\s*,\s*"([^"]*)"\s*\]/g)) {
     pairs[match[1]] = match[2];
   }
+  const attributes = /setCustomAttributes\(\s*(\{[^{}]*\})\s*\)/.exec(body)?.[1];
+  if (attributes) {
+    try {
+      for (const [key, value] of Object.entries(JSON.parse(attributes))) {
+        if (typeof value === "string" || typeof value === "number") {
+          pairs[key] = String(value);
+        }
+      }
+    } catch {
+      // An object that is not plain JSON leaves these fields unset.
+    }
+  }
 
-  return { remaining, usedToday, usedPast, remainingText, usedTodayText, usedPastText, pairs };
+  // The console prints the reset day too. It backs up the chat script's
+  // next_reset, so the date survives the next change to that script.
+  const printedReset = /下次重置[:：]\s*(\d{4}-\d{2}-\d{2})/.exec(body)?.[1] || null;
+
+  return { remaining, usedToday, usedPast, remainingText, usedTodayText, usedPastText, pairs, printedReset };
 }
 
 function formatGb(value) {
   return `${value >= 100 ? value.toFixed(0) : value.toFixed(1)}GB`;
 }
 
+// A reset day is read as midnight UTC+8. A value that names no real day reads
+// as unknown, so it cannot throw and take the traffic meter down with it.
+function resetInstant(day) {
+  const instant = /^\d{4}-\d{2}-\d{2}$/.test(day || "") ? Date.parse(`${day}T00:00:00+08:00`) : NaN;
+  return Number.isFinite(instant) ? new Date(instant).toISOString() : null;
+}
+
 function buildResult(env, body) {
-  const { remaining, usedToday, usedPast, remainingText, usedTodayText, usedPastText, pairs } = parsePage(body);
+  const { remaining, usedToday, usedPast, remainingText, usedTodayText, usedPastText, pairs, printedReset } =
+    parsePage(body);
 
   if (remaining === null) {
     throw new Error("could not find #remain on /user; the page layout may have changed.");
@@ -162,9 +188,7 @@ function buildResult(env, body) {
   const used = (usedToday || 0) + (usedPast || 0);
   const total = used + remaining;
 
-  const resetsAt = /^\d{4}-\d{2}-\d{2}$/.test(pairs.next_reset || "")
-    ? new Date(`${pairs.next_reset}T00:00:00+08:00`).toISOString()
-    : null;
+  const resetsAt = resetInstant(pairs.next_reset) || resetInstant(printedReset);
 
   const detailParts = [];
   if (usedPastText) {
